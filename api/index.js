@@ -1082,15 +1082,33 @@ module.exports = (req, res) => {
     }
 
     const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    const pathname = parsedUrl.pathname;
+    
+    // Resolve route from multiple sources:
+    // 1. Query parameter ?route=... (from vercel.json rewrite)
+    // 2. Query parameter ?path=...
+    // 3. Vercel internal headers (x-matched-path, x-forwarded-uri, x-invoke-path)
+    // 4. URL pathname
+    const routeParam = (parsedUrl.searchParams.get('route') || parsedUrl.searchParams.get('path') || '').replace(/^\/+/, '').trim();
+    const rawPath = (req.headers['x-matched-path'] 
+                 || req.headers['x-forwarded-uri'] 
+                 || req.headers['x-invoke-path'] 
+                 || parsedUrl.pathname 
+                 || '').replace(/^\/+/, '').trim();
 
-    if (pathname.endsWith('/api/status') || pathname === '/api/status') {
+    const isRoute = (name) => {
+        if (routeParam === name || routeParam.startsWith(`${name}/`)) return true;
+        if (rawPath === `api/${name}` || rawPath.endsWith(`/${name}`) || rawPath.startsWith(`api/${name}/`)) return true;
+        if (rawPath === name) return true;
+        return false;
+    };
+
+    if (isRoute('status') || (!routeParam && (rawPath === 'api' || rawPath === 'api/' || rawPath === 'api/index.js' || rawPath === 'api/index'))) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'online', version: '2.0.0', time: new Date() }));
         return;
     }
 
-    if (pathname.endsWith('/api/ai-status') || pathname === '/api/ai-status') {
+    if (isRoute('ai-status')) {
         const hasEnvKey = !!(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.trim().length > 10 && process.env.GROQ_API_KEY !== 'gsk_sua_chave_groq_aqui');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
@@ -1101,7 +1119,7 @@ module.exports = (req, res) => {
         return;
     }
 
-    if (pathname.endsWith('/api/test-groq') || pathname === '/api/test-groq') {
+    if (isRoute('test-groq')) {
         let body = '';
         req.on('data', chunk => { body += chunk; });
         req.on('end', async () => {
@@ -1122,13 +1140,13 @@ module.exports = (req, res) => {
         return;
     }
 
-    if (pathname.endsWith('/api/samples') || pathname === '/api/samples') {
+    if (isRoute('samples')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(SAMPLE_COURSES));
         return;
     }
 
-    if (pathname.endsWith('/api/generate-msep') || pathname === '/api/generate-msep') {
+    if (isRoute('generate-msep')) {
         let body = '';
         req.on('data', chunk => { body += chunk; });
         req.on('end', async () => {
@@ -1145,7 +1163,7 @@ module.exports = (req, res) => {
         return;
     }
 
-    if (pathname.endsWith('/api/export-irrac') || pathname === '/api/export-irrac') {
+    if (isRoute('export-irrac')) {
         let body = '';
         req.on('data', chunk => { body += chunk; });
         req.on('end', () => {
@@ -1170,5 +1188,5 @@ module.exports = (req, res) => {
     }
 
     res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Route not found' }));
+    res.end(JSON.stringify({ error: 'Route not found', requestedRoute: routeParam || rawPath }));
 };
