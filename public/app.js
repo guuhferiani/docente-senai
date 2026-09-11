@@ -1023,53 +1023,55 @@ function renderMSEPViewer() {
 
             <!-- Criteria Table for this SA -->
             <div style="margin-top: 1.25rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
                     <h4 style="font-size: 0.9rem; font-weight: 700; color: var(--text-main);">📋 Matriz de Critérios de Avaliação (IRRAC)</h4>
                     <button class="btn btn-outline btn-xs btn-add-crit" data-sa-idx="${saIdx}">+ Adicionar Critério</button>
                 </div>
-                <table class="criteria-table" id="criteria-table-${saIdx}">
-                    <thead>
-                        <tr>
-                            <th style="width: 25%;">Capacidade</th>
-                            <th style="width: 50%;">Critério de Desempenho Observável</th>
-                            <th style="width: 18%; text-align: center;">Classificação</th>
-                            <th style="width: 7%; text-align: center;">Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody id="criteria-tbody-${saIdx}">
-                        ${sa.criterios.map((c, cIdx) => `
-                            <tr id="crit-row-${saIdx}-${cIdx}">
-                                <td>
-                                    <input type="text" class="form-control form-control-sm crit-cap-input" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" value="${c.cap || ''}" placeholder="(Continuação)">
-                                </td>
-                                <td>
-                                    <input type="text" class="form-control form-control-sm crit-text-input" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" value="${c.crit}" style="${c.tipo === 'C' ? 'font-weight: 700;' : ''}">
-                                </td>
-                                <td style="text-align: center;">
-                                    <div class="custom-select-wrap" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" data-selected-val="${c.tipo || 'C'}">
-                                        <button type="button" class="custom-select-trigger" aria-haspopup="listbox">
-                                            <span class="custom-select-label">${c.tipo === 'C' ? 'Crítico (C)' : 'Desejável (D)'}</span>
-                                            <svg class="custom-select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                                        </button>
-                                        <div class="custom-select-dropdown" role="listbox">
-                                            <div class="custom-select-item ${c.tipo === 'C' ? 'active' : ''}" data-val="C">
-                                                <span class="item-title">Crítico (C)</span>
-                                                <span class="item-desc">Item obrigatório para aprovação</span>
-                                            </div>
-                                            <div class="custom-select-item ${c.tipo === 'D' ? 'active' : ''}" data-val="D">
-                                                <span class="item-title">Desejável (D)</span>
-                                                <span class="item-desc">Item de aprimoramento e notas</span>
+                <div class="table-responsive">
+                    <table class="criteria-table" id="criteria-table-${saIdx}">
+                        <thead>
+                            <tr>
+                                <th style="width: 25%;">Capacidade</th>
+                                <th style="width: 50%;">Critério de Desempenho Observável</th>
+                                <th style="width: 18%; text-align: center;">Classificação</th>
+                                <th style="width: 7%; text-align: center;">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="criteria-tbody-${saIdx}">
+                            ${sa.criterios.map((c, cIdx) => `
+                                <tr id="crit-row-${saIdx}-${cIdx}">
+                                    <td>
+                                        <input type="text" class="form-control form-control-sm crit-cap-input" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" value="${c.cap || ''}" placeholder="(Continuação)">
+                                    </td>
+                                    <td>
+                                        <input type="text" class="form-control form-control-sm crit-text-input" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" value="${c.crit}" style="${c.tipo === 'C' ? 'font-weight: 700;' : ''}">
+                                    </td>
+                                    <td style="text-align: center;">
+                                        <div class="custom-select-wrap" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" data-selected-val="${c.tipo || 'C'}">
+                                            <button type="button" class="custom-select-trigger" aria-haspopup="listbox">
+                                                <span class="custom-select-label">${c.tipo === 'C' ? 'Crítico (C)' : 'Desejável (D)'}</span>
+                                                <svg class="custom-select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                            </button>
+                                            <div class="custom-select-dropdown" role="listbox">
+                                                <div class="custom-select-item ${c.tipo === 'C' ? 'active' : ''}" data-val="C">
+                                                    <span class="item-title">Crítico (C)</span>
+                                                    <span class="item-desc">Item obrigatório para aprovação</span>
+                                                </div>
+                                                <div class="custom-select-item ${c.tipo === 'D' ? 'active' : ''}" data-val="D">
+                                                    <span class="item-title">Desejável (D)</span>
+                                                    <span class="item-desc">Item de aprimoramento e notas</span>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                </td>
-                                <td style="text-align: center;">
-                                    <button class="btn btn-outline btn-xs btn-delete-crit" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" title="Excluir linha">🗑️</button>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+                                    </td>
+                                    <td style="text-align: center;">
+                                        <button class="btn btn-outline btn-xs btn-delete-crit" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" title="Excluir linha">🗑️</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         `;
         container.appendChild(saCard);
