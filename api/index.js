@@ -175,19 +175,33 @@ function buildPresetPlan(preset, overrides) {
     const isEletrica = preset === SAMPLE_COURSES.eletrica;
     const isAutomacao = preset === SAMPLE_COURSES.automacao;
 
+    const totalHours = overrides.workload || preset.workload;
+    const cursoTipo = overrides.cursoTipo || 'tecnico';
+    const duracao = parseInt(overrides.duracaoAula) || (cursoTipo === 'fic' ? 60 : 45);
+    const totalAulas = Math.round((totalHours * 60) / duracao);
+    let numAulasText = `${totalAulas} aulas de ${duracao} minutos cada`;
+    if (overrides.modalidade === 'semipresencial' && (overrides.aulasPresenciais || overrides.aulasEad)) {
+        numAulasText += ` (Presencial: ${overrides.aulasPresenciais || 0} | EaD: ${overrides.aulasEad || 0})`;
+    }
+
     const base = {
         curso: overrides.courseName || preset.courseName,
         unidade: overrides.courseUnit || preset.courseUnit,
         sigla: overrides.unitSigla || preset.unitSigla,
-        cargaHoraria: overrides.workload || preset.workload,
-        numAulas: `${overrides.workload || preset.workload} aulas de 60 minutos cada`,
+        cursoTipo: cursoTipo,
+        duracaoAula: duracao,
+        modalidade: overrides.modalidade || 'presencial',
+        cargaHoraria: totalHours,
+        numAulas: overrides.numAulas || numAulasText,
         docente: overrides.docente || preset.docente,
         turma: overrides.turma || preset.turma,
         semAno: overrides.semAno || preset.semAno,
         escola: overrides.escola || preset.escola
     };
 
-    if (isEletrica) {
+    if (overrides.objetivoUC && overrides.objetivoUC.trim().length > 5) {
+        base.objetivoUC = overrides.objetivoUC.trim();
+    } else if (isEletrica) {
         base.objetivoUC = "Desenvolver capacidades técnicas e socioemocionais relativas à montagem, parametrização de acionamentos e diagnóstico de falhas em sistemas de comandos elétricos industriais conforme normas técnicas e de segurança.";
         base.situacoes = [
             {
@@ -332,37 +346,50 @@ async function generateWithGroq(courseInfo) {
     const totalHours = parseInt(courseInfo.workload) || 40;
     const courseName = courseInfo.courseName || "Curso Técnico";
     const sigla = courseInfo.unitSigla || "CURSO";
+    const cursoTipo = courseInfo.cursoTipo || "tecnico";
+    const duracaoAula = parseInt(courseInfo.duracaoAula) || (cursoTipo === 'fic' ? 60 : 45);
+    const totalAulas = Math.round((totalHours * 60) / duracaoAula);
+    const tipoLabel = (cursoTipo === 'cai')
+        ? 'Curso Regular de Aprendizagem Industrial (CAI)'
+        : (cursoTipo === 'fic' ? 'Formação Inicial e Continuada (FIC)' : 'Curso Técnico de Nível Médio (Cursos Regulares)');
+    const modalidadeLabel = (courseInfo.modalidade === 'semipresencial')
+        ? `Semipresencial (${courseInfo.aulasPresenciais || 0} aulas presenciais e ${courseInfo.aulasEad || 0} aulas EaD / não presenciais)`
+        : '100% Presencial';
 
-    const prompt = `Você é um Engenheiro Pedagógico Especialista do SENAI-SP com domínio completo da Metodologia SENAI de Educação Profissional (MSEP) e do Instrumento de Registro de Resultados da Avaliação com Critérios (IRRAC).
+    const prompt = `Você é um Engenheiro Pedagógico Especialista do SENAI-SP com domínio completo da Metodologia SENAI de Educação Profissional (MSEP), do Book MSEP e do Instrumento de Registro de Resultados da Avaliação com Critérios (IRRAC).
 
 Gere um Plano de Ensino MSEP Modular para o seguinte curso:
 - Curso / Unidade Curricular: "${courseName}"
+- Nível / Tipo de Curso: "${tipoLabel}"
+- Modalidade: "${modalidadeLabel}"
 - Sigla da UC: "${sigla}"
-- Carga Horária Total: ${totalHours} horas
+- Carga Horária Total: ${totalHours} horas (correspondente a ${totalAulas} aulas de ${duracaoAula} minutos cada)
 - Escola: "${courseInfo.escola || 'Escola SENAI'}"
 - Docente: "${courseInfo.docente || 'Docente SENAI'}"
 - Turma: "${courseInfo.turma || 'TURMA 2026'}"
 - Semestre/Ano: "${courseInfo.semAno || '2º Sem/2026'}"
+${courseInfo.objetivoUC ? `- Objetivo da Unidade Curricular (utilize este exatamente): "${courseInfo.objetivoUC}"` : ''}
 
-Diretrizes Rigorosas do SENAI MSEP:
-1. Determine a quantidade adequada de Situações de Aprendizagem (SAs) para a carga horária (ex: 20h = 1 SA; 40-60h = 2 SAs; 80-100h = 3 SAs; 120-200h = 4 SAs).
-2. A soma exata do campo 'aulas' de todas as SAs DEVE SER EXATAMENTE IGUAL a ${totalHours} horas.
-3. Para cada SA:
+Diretrizes Rigorosas do SENAI MSEP (Diretrizes Oficiais dos Prompts MSEP):
+1. REGRA FUNDAMENTAL: NUNCA FAÇA ABREVIAÇÕES DE CONTEÚDOS, CAPACIDADES OU CONHECIMENTOS. Reescreva a descrição técnica completa de cada capacidade e conhecimento, NUNCA utilize códigos ou siglas como 'K1', 'CT02' ou 'CS3'.
+2. Determine a quantidade adequada de Situações de Aprendizagem (SAs) para a carga horária (ex: 20h = 1 SA; 40-60h = 2 SAs; 80-100h = 3 SAs; 120-200h = 4 SAs).
+3. A soma exata do campo 'aulas' de todas as SAs DEVE SER EXATAMENTE IGUAL a ${totalHours} horas.
+4. Para cada SA:
    - 'numero': "01", "02", etc.
-   - 'titulo': Título prático e estimulante contextualizado na indústria.
+   - 'titulo': Título prático e estimulante contextualizado no mercado de trabalho industrial.
    - 'aulas': Quantidade de horas (inteiro).
-   - 'estrategiaTipo': 'Situação-problema', 'Projeto', 'Estudo de caso' ou 'Pesquisa aplicada'.
-   - 'capacidadesTecnicas': Array com 2 a 4 capacidades técnicas específicas e observáveis da área profissional.
+   - 'estrategiaTipo': 'Situação-problema', 'Projeto', 'Estudo de caso' ou 'Pesquisa aplicada' (conforme sugerido no Book MSEP).
+   - 'capacidadesTecnicas': Array com 2 a 4 capacidades técnicas completas sem abreviações.
    - 'capacidadesSocioemocionais': Array com 1 a 3 capacidades (ex: 'Demonstrar raciocínio lógico.', 'Demonstrar atenção a detalhes.', 'Demonstrar responsabilidade.').
-   - 'conhecimentos': Array com tópicos de conhecimentos técnicos e normas pertinentes.
+   - 'conhecimentos': Array com tópicos de conhecimentos técnicos e normas pertinentes (redação completa).
    - 'contextualizacao': Narrativa imersiva de uma empresa ou cenário industrial real com um problema a ser resolvido.
-   - 'observacoesDocente': Instruções e dicas pedagógicas para a condução do professor.
-   - 'desafio': O desafio técnico que os alunos devem solucionar.
-   - 'resultadosEsperados': Entregas tangíveis esperadas dos alunos.
-   - 'estrategiasEnsino': Métodos didáticos (ex: 'Projeto prático em laboratório; Trabalho em equipe; Resolução guiada').
+   - 'observacoesDocente': Instruções e dicas pedagógicas para a condução do professor (foco, mediação, segurança).
+   - 'desafio': O desafio prático que os alunos devem solucionar.
+   - 'resultadosEsperados': Entregas tangíveis esperadas dos alunos (produtos, relatórios, protótipos).
+   - 'estrategiasEnsino': Métodos didáticos (ex: 'Projeto prático em bancada; Trabalho em equipe; Resolução colaborativa').
    - 'instrumentosAvaliacao': Instrumentos avaliativos (ex: 'Avaliação prática de desempenho; Relatório técnico; Checklist').
-   - 'recursos': Máquinas, bancadas, ferramentas ou softwares específicos da área.
-   - 'criterios': Array de objetos com critérios de avaliação observáveis no presente do indicativo:
+   - 'recursos': Máquinas, bancadas didáticas, ferramentas, instrumentos ou softwares específicos da área.
+   - 'criterios': Array de objetos com critérios de avaliação observáveis redigidos rigorosamente no PRESENTE DO INDICATIVO:
        - 'cap': Nome da capacidade ou "" se for desdobramento.
        - 'crit': Texto do critério observável (ex: 'Parametriza o equipamento de acordo com as especificações técnicas.').
        - 'tipo': "C" para Crítico (eliminatório) ou "D" para Desejável (formativo/qualidade). Balanceie rigorosamente entre C e D (50% C e 50% D).
@@ -372,13 +399,16 @@ Retorne APENAS um JSON no seguinte formato:
   "curso": "${courseName}",
   "unidade": "${courseInfo.courseUnit || courseName}",
   "sigla": "${sigla}",
+  "cursoTipo": "${cursoTipo}",
+  "duracaoAula": ${duracaoAula},
+  "modalidade": "${courseInfo.modalidade || 'presencial'}",
   "cargaHoraria": ${totalHours},
-  "numAulas": "${totalHours} aulas de 60 minutos cada",
+  "numAulas": "${totalAulas} aulas de ${duracaoAula} minutos cada",
   "docente": "${courseInfo.docente || 'Docente SENAI'}",
   "turma": "${courseInfo.turma || 'TURMA 2026'}",
   "semAno": "${courseInfo.semAno || '2º Sem/2026'}",
   "escola": "${courseInfo.escola || 'Escola SENAI'}",
-  "objetivoUC": "Objetivo pedagógico da Unidade Curricular...",
+  "objetivoUC": "${courseInfo.objetivoUC || 'Desenvolver as competências técnicas e socioemocionais preconizadas na matriz curricular.'}",
   "situacoes": [ ... ]
 }`;
 
@@ -387,7 +417,16 @@ Retorne APENAS um JSON no seguinte formato:
 
     for (const modelName of candidateModels) {
         const plan = await callGroqChat(apiKey, prompt, modelName);
-        if (plan) return plan;
+        if (plan) {
+            if (courseInfo.objetivoUC && courseInfo.objetivoUC.trim()) {
+                plan.objetivoUC = courseInfo.objetivoUC.trim();
+            }
+            plan.cursoTipo = cursoTipo;
+            plan.duracaoAula = duracaoAula;
+            plan.modalidade = courseInfo.modalidade || 'presencial';
+            if (courseInfo.numAulas) plan.numAulas = courseInfo.numAulas;
+            return plan;
+        }
     }
     return null;
 }
@@ -799,17 +838,30 @@ function buildGenericDynamicPlan(courseInfo) {
         });
     }
 
+    const cursoTipo = courseInfo.cursoTipo || 'tecnico';
+    const duracao = parseInt(courseInfo.duracaoAula) || (cursoTipo === 'fic' ? 60 : 45);
+    const totalAulas = Math.round((totalHours * 60) / duracao);
+    let numAulasText = `${totalAulas} aulas de ${duracao} minutos cada`;
+    if (courseInfo.modalidade === 'semipresencial' && (courseInfo.aulasPresenciais || courseInfo.aulasEad)) {
+        numAulasText += ` (Presencial: ${courseInfo.aulasPresenciais || 0} | EaD: ${courseInfo.aulasEad || 0})`;
+    }
+
     return {
         curso: courseName,
         unidade: courseInfo.courseUnit || courseName,
         sigla: sigla,
+        cursoTipo: cursoTipo,
+        duracaoAula: duracao,
+        modalidade: courseInfo.modalidade || 'presencial',
         cargaHoraria: totalHours,
-        numAulas: `${totalHours} aulas de 60 minutos cada`,
+        numAulas: courseInfo.numAulas || numAulasText,
         docente: courseInfo.docente || "Docente SENAI",
         turma: courseInfo.turma || "TURMA 2026",
         semAno: courseInfo.semAno || "2º Sem/2026",
         escola: courseInfo.escola || "Escola SENAI \"Mariano Ferraz\"",
-        objetivoUC: `Desenvolver capacidades técnicas e socioemocionais relativas a ${courseName} de acordo com as diretrizes do MSEP.`,
+        objetivoUC: courseInfo.objetivoUC && courseInfo.objetivoUC.trim().length > 5 
+            ? courseInfo.objetivoUC.trim() 
+            : `Desenvolver capacidades técnicas e socioemocionais relativas a ${courseName} de acordo com as diretrizes do MSEP.`,
         situacoes: situacoes,
         _generatedByAI: false,
         _aiProvider: 'Motor Heurístico Multiárea SENAI'

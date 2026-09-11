@@ -146,6 +146,45 @@
                         <input type="text" id="inp-course-name" class="form-control" placeholder="Ex: Técnico em Desenvolvimento de Sistemas - Programação Web">
                     </div>
 
+                    <!-- Nível / Tipo de Curso (Diretrizes MSEP: 45 min Cursos Regulares vs 60 min FIC) -->
+                    <div class="form-group full-width">
+                        <label class="form-label-with-hint">
+                            <span>Nível / Tipo de Curso <span class="required-asterisk">*</span></span>
+                            <span class="label-hint">Define a conversão de horas em aulas (45 min ou 60 min)</span>
+                        </label>
+                        <div class="course-type-grid" role="radiogroup" aria-label="Tipo de Curso">
+                            <label class="course-type-card active" id="card-type-tecnico">
+                                <input type="radio" name="radio-course-type" value="tecnico" checked>
+                                <div class="type-card-header">
+                                    <span class="type-card-badge">Cursos Regulares</span>
+                                    <span class="type-card-duration">45 min / aula</span>
+                                </div>
+                                <div class="type-card-title">Técnico</div>
+                                <div class="type-card-desc">Cursos Técnicos de Nível Médio (matriz regular em horas-aula de 45 minutos)</div>
+                            </label>
+
+                            <label class="course-type-card" id="card-type-cai">
+                                <input type="radio" name="radio-course-type" value="cai">
+                                <div class="type-card-header">
+                                    <span class="type-card-badge">Cursos Regulares</span>
+                                    <span class="type-card-duration">45 min / aula</span>
+                                </div>
+                                <div class="type-card-title">CAI (Aprendizagem)</div>
+                                <div class="type-card-desc">Cursos de Aprendizagem Industrial (horas-aula regulares de 45 minutos)</div>
+                            </label>
+
+                            <label class="course-type-card" id="card-type-fic">
+                                <input type="radio" name="radio-course-type" value="fic">
+                                <div class="type-card-header">
+                                    <span class="type-card-badge fic-badge">Formação Inicial</span>
+                                    <span class="type-card-duration">60 min / aula</span>
+                                </div>
+                                <div class="type-card-title">FIC</div>
+                                <div class="type-card-desc">Qualificação e Aperfeiçoamento Profissional (aulas padrão de 60 minutos)</div>
+                            </label>
+                        </div>
+                    </div>
+
                     <div class="form-group">
                         <label for="inp-unit-sigla">Sigla da Unidade (Nome da Aba no IRRAC)</label>
                         <input type="text" id="inp-unit-sigla" class="form-control" placeholder="Ex: DEV-SIST ou BANC-DADOS">
@@ -154,6 +193,65 @@
                     <div class="form-group">
                         <label for="inp-workload">Carga Horária Total (Horas)</label>
                         <input type="number" id="inp-workload" class="form-control" placeholder="Ex: 80, 120, 160" min="1" max="1200">
+                    </div>
+
+                    <!-- Banner de Conversão Dinâmica de Carga Horária em Aulas -->
+                    <div class="form-group full-width">
+                        <div class="class-calc-card" id="class-calc-card">
+                            <div class="class-calc-icon">⏱️</div>
+                            <div class="class-calc-info">
+                                <div class="class-calc-title">
+                                    <strong>Conversão de Aulas MSEP:</strong>
+                                    <span class="class-calc-badge" id="badge-calc-result">Informe a carga horária acima</span>
+                                </div>
+                                <div class="class-calc-subtext" id="calc-explanation-text">
+                                    Cursos regulares (Técnico e CAI) são convertidos em aulas de 45 minutos. Cursos FIC utilizam aulas de 60 minutos.
+                                </div>
+                            </div>
+                            <div class="class-calc-custom">
+                                <label for="select-duracao-aula" style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Duração da Aula</label>
+                                <select id="select-duracao-aula" class="form-control form-control-sm" style="width: 110px; font-weight: 600;">
+                                    <option value="45" selected>45 min</option>
+                                    <option value="60">60 min</option>
+                                    <option value="50">50 min</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Modalidade de Oferta (Presencial vs Semipresencial / Não Presencial) -->
+                    <div class="form-group full-width">
+                        <label class="form-label-with-hint">
+                            <span>Modalidade da Unidade Curricular</span>
+                            <span class="label-hint">Especifique se há aulas não presenciais (EaD)</span>
+                        </label>
+                        <div class="modalidade-toggle-group">
+                            <label class="modalidade-btn active" id="btn-mod-presencial">
+                                <input type="radio" name="radio-modalidade" value="presencial" checked style="display: none;">
+                                <span>🏫 100% Presencial</span>
+                            </label>
+                            <label class="modalidade-btn" id="btn-mod-semipresencial">
+                                <input type="radio" name="radio-modalidade" value="semipresencial" style="display: none;">
+                                <span>🌐 Semipresencial (com EaD)</span>
+                            </label>
+                        </div>
+
+                        <!-- Painel Condicional de Divisão Presencial vs EaD -->
+                        <div class="ead-breakdown-box" id="ead-breakdown-box" style="display: none;">
+                            <div class="ead-inputs-row">
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="inp-aulas-presenciais">Aulas Presenciais</label>
+                                    <input type="number" id="inp-aulas-presenciais" class="form-control" placeholder="Ex: 85" min="0">
+                                </div>
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label for="inp-aulas-ead">Aulas Não Presenciais (EaD)</label>
+                                    <input type="number" id="inp-aulas-ead" class="form-control" placeholder="Ex: 22" min="0">
+                                </div>
+                                <div class="ead-summary-pill" id="ead-summary-pill">
+                                    <span id="ead-total-display">0 / 0 aulas distribuídas</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="form-group">
@@ -205,6 +303,15 @@
 
                             <input type="hidden" id="inp-sem-ano" value="2º Sem/2026">
                         </div>
+                    </div>
+
+                    <!-- Objetivo da Unidade Curricular (Opcional - preenche o cabeçalho oficial) -->
+                    <div class="form-group full-width">
+                        <label for="inp-objetivo-uc" class="form-label-with-hint">
+                            <span>Objetivo da Unidade Curricular</span>
+                            <span class="label-hint">Copie do Plano de Curso (ou deixe vazio para gerar via IA)</span>
+                        </label>
+                        <textarea id="inp-objetivo-uc" class="form-control" rows="2" placeholder="Ex: Desenvolver as capacidades técnicas e socioemocionais para elaboração de projetos e programação..."></textarea>
                     </div>
                 </div>
 

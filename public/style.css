@@ -534,6 +534,258 @@ body {
     display: inline-block;
 }
 
+/* ==========================================================================
+   Pedagogical Form Enhancements (Course Types, Hours Conversion & EaD)
+   ========================================================================== */
+.form-label-with-hint {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.45rem;
+}
+
+.label-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.required-asterisk {
+    color: #e11d48;
+    font-weight: 700;
+}
+
+/* Course Type 3-Card Grid */
+.course-type-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-top: 0.25rem;
+}
+
+@media (max-width: 900px) {
+    .course-type-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.course-type-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background: #ffffff;
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 1.1rem 1.15rem;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: var(--shadow-sm);
+}
+
+.course-type-card:hover {
+    border-color: #94a3b8;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-card-hover);
+}
+
+.course-type-card.active {
+    border-color: #0f172a;
+    background: #f8fafc;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.course-type-card input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.type-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.type-card-badge {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #0284c7;
+    background: #e0f2fe;
+    border: 1px solid #bae6fd;
+    padding: 0.15rem 0.5rem;
+    border-radius: 9999px;
+}
+
+.type-card-badge.fic-badge {
+    color: #7c3aed;
+    background: #f3e8ff;
+    border-color: #ddd6fe;
+}
+
+.type-card-duration {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-main);
+    background: #f1f5f9;
+    padding: 0.15rem 0.45rem;
+    border-radius: var(--radius-sm);
+}
+
+.type-card-title {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: var(--text-main);
+    margin-bottom: 0.25rem;
+}
+
+.type-card-desc {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+/* Class Hours Conversion Card */
+.class-calc-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    background: #f8fafc;
+    border: 1.5px solid #cbd5e1;
+    border-radius: var(--radius-md);
+    padding: 0.9rem 1.25rem;
+    margin-top: 0.2rem;
+}
+
+.class-calc-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.class-calc-info {
+    flex: 1;
+}
+
+.class-calc-title {
+    font-size: 0.92rem;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-bottom: 0.2rem;
+}
+
+.class-calc-badge {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #065f46;
+    background: #d1fae5;
+    border: 1px solid #a7f3d0;
+    padding: 0.2rem 0.65rem;
+    border-radius: 9999px;
+    letter-spacing: 0.01em;
+}
+
+.class-calc-subtext {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.class-calc-custom {
+    flex-shrink: 0;
+    border-left: 1px solid var(--border-color);
+    padding-left: 1rem;
+}
+
+/* Modalidade Toggle */
+.modalidade-toggle-group {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.25rem;
+}
+
+.modalidade-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem 1rem;
+    background: #ffffff;
+    border: 1.5px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-main);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.modalidade-btn:hover {
+    background: var(--bg-surface);
+    border-color: #94a3b8;
+}
+
+.modalidade-btn.active {
+    background: #0f172a;
+    color: #ffffff;
+    border-color: #0f172a;
+    box-shadow: var(--shadow-sm);
+}
+
+/* EaD Breakdown Box */
+.ead-breakdown-box {
+    background: #f8fafc;
+    border: 1.5px dashed #94a3b8;
+    border-radius: var(--radius-md);
+    padding: 1rem 1.25rem;
+    margin-top: 0.75rem;
+    animation: fadeIn 0.2s ease;
+}
+
+.ead-inputs-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.ead-inputs-row .form-group {
+    flex: 1;
+    min-width: 140px;
+}
+
+.ead-summary-pill {
+    padding: 0.65rem 1rem;
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-main);
+    white-space: nowrap;
+    height: 42px;
+    display: flex;
+    align-items: center;
+}
+
+.ead-summary-pill.balanced {
+    color: #059669;
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+}
+
+.ead-summary-pill.unbalanced {
+    color: #d97706;
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+
 .card-footer {
     display: flex;
     justify-content: space-between;

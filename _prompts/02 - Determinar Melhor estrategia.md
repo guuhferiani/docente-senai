@@ -1,0 +1,1 @@
+Com base nos grupos de competências e conhecimentos já organizados e considerando o livro Book MSEP Digital, indique a estratégia mais adequada para cada grupo, escolhendo entre as possibilidades sugeridas no livro.
