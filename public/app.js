@@ -4,52 +4,53 @@
 // ==========================================================================
 
 const STORAGE_KEY = 'docente_senai_state_v3';
-const GROQ_STORAGE_KEY = 'docente_senai_groq_key';
+const GEMINI_STORAGE_KEY = 'docente_senai_gemini_key';
 
-function getGroqApiKey() {
-    return localStorage.getItem(GROQ_STORAGE_KEY) || '';
+function getGeminiApiKey() {
+    return localStorage.getItem(GEMINI_STORAGE_KEY) || localStorage.getItem('docente_senai_groq_key') || '';
 }
 
-function setGroqApiKey(key) {
+function setGeminiApiKey(key) {
     if (key && key.trim()) {
-        localStorage.setItem(GROQ_STORAGE_KEY, key.trim());
+        localStorage.setItem(GEMINI_STORAGE_KEY, key.trim());
     } else {
-        localStorage.removeItem(GROQ_STORAGE_KEY);
+        localStorage.removeItem(GEMINI_STORAGE_KEY);
+        localStorage.removeItem('docente_senai_groq_key');
     }
 }
 
-async function checkGroqStatus() {
-    const localKey = getGroqApiKey();
+async function checkGeminiStatus() {
+    const localKey = getGeminiApiKey();
     const dot = document.getElementById('ai-header-dot');
     const text = document.getElementById('ai-header-text');
 
     try {
         const res = await fetch('/api/ai-status');
         const data = await res.json();
-        const hasKey = (localKey && localKey.trim().length > 10) || data.groqConfigured;
+        const hasKey = (localKey && localKey.trim().length > 10) || data.geminiConfigured;
         
         if (hasKey) {
             if (dot) dot.className = 'ai-pulse-dot active';
-            if (text) text.textContent = '🟢 IA Groq Ativa';
+            if (text) text.textContent = '🟢 IA Gemini Ativa';
         } else {
             if (dot) dot.className = 'ai-pulse-dot';
-            if (text) text.textContent = '⚡ Ativar IA (Groq)';
+            if (text) text.textContent = '⚡ Ativar IA (Gemini)';
         }
         return hasKey;
     } catch (e) {
         if (localKey && localKey.trim().length > 10) {
             if (dot) dot.className = 'ai-pulse-dot active';
-            if (text) text.textContent = '🟢 IA Groq Ativa';
+            if (text) text.textContent = '🟢 IA Gemini Ativa';
             return true;
         }
         if (dot) dot.className = 'ai-pulse-dot';
-        if (text) text.textContent = '⚡ Ativar IA (Groq)';
+        if (text) text.textContent = '⚡ Ativar IA (Gemini)';
         return false;
     }
 }
 
 async function updateModalAiStatus() {
-    const localKey = getGroqApiKey();
+    const localKey = getGeminiApiKey();
     const modalDot = document.getElementById('ai-modal-dot');
     const modalTitle = document.getElementById('ai-modal-title');
     const modalDesc = document.getElementById('ai-modal-desc');
@@ -58,18 +59,18 @@ async function updateModalAiStatus() {
         const res = await fetch('/api/ai-status');
         const data = await res.json();
         
-        if (data.groqConfigured) {
+        if (data.geminiConfigured) {
             if (modalDot) modalDot.className = 'status-indicator-dot active';
             if (modalTitle) modalTitle.textContent = 'Conectado via Servidor (.env)';
-            if (modalDesc) modalDesc.textContent = 'A chave GROQ_API_KEY do servidor está configurada e ativa.';
+            if (modalDesc) modalDesc.textContent = 'A chave GEMINI_API_KEY do servidor está configurada e ativa.';
         } else if (localKey && localKey.length > 10) {
             if (modalDot) modalDot.className = 'status-indicator-dot active';
             if (modalTitle) modalTitle.textContent = 'Conectado via Navegador (LocalStorage)';
-            if (modalDesc) modalDesc.textContent = 'Chave personalizada salva no seu navegador.';
+            if (modalDesc) modalDesc.textContent = 'Chave do Google Gemini salva no seu navegador.';
         } else {
             if (modalDot) modalDot.className = 'status-indicator-dot';
             if (modalTitle) modalTitle.textContent = 'Modo Heurístico Multiárea (Offline)';
-            if (modalDesc) modalDesc.textContent = 'Insira uma chave da Groq abaixo para ativar a geração por IA Llama 3.3 70B.';
+            if (modalDesc) modalDesc.textContent = 'Insira uma chave do Google Gemini abaixo para ativar a geração por IA.';
         }
     } catch (e) {
         if (localKey && localKey.length > 10) {
@@ -295,7 +296,7 @@ function initSemestreAnoOptions() {
 document.addEventListener('DOMContentLoaded', () => {
     initSemestreAnoOptions();
     initEventListeners();
-    checkGroqStatus();
+    checkGeminiStatus();
 
     // Check for saved local state
     const hasSavedState = loadFromLocalStorage();
@@ -500,19 +501,19 @@ function initEventListeners() {
         btnReset.addEventListener('click', handleResetPlan);
     }
 
-    // AI Modal Handlers
+    // AI Modal Handlers (Google Gemini)
     const btnAiConfig = document.getElementById('btn-ai-config');
     const modalAi = document.getElementById('modal-ai-config');
     const btnCloseAi = document.getElementById('btn-close-ai-modal');
     const btnToggleKey = document.getElementById('btn-toggle-key');
-    const inpGroqKey = document.getElementById('inp-groq-key');
-    const btnTestGroq = document.getElementById('btn-test-groq-key');
-    const btnSaveGroq = document.getElementById('btn-save-groq-key');
+    const inpGeminiKey = document.getElementById('inp-gemini-key');
+    const btnTestGemini = document.getElementById('btn-test-gemini-key');
+    const btnSaveGemini = document.getElementById('btn-save-gemini-key');
     const aiTestResult = document.getElementById('ai-test-result');
 
     if (btnAiConfig && modalAi) {
         btnAiConfig.addEventListener('click', () => {
-            if (inpGroqKey) inpGroqKey.value = getGroqApiKey() || '';
+            if (inpGeminiKey) inpGeminiKey.value = getGeminiApiKey() || '';
             if (aiTestResult) aiTestResult.style.display = 'none';
             updateModalAiStatus();
             modalAi.style.display = 'flex';
@@ -533,21 +534,21 @@ function initEventListeners() {
         });
     }
 
-    if (btnToggleKey && inpGroqKey) {
+    if (btnToggleKey && inpGeminiKey) {
         btnToggleKey.addEventListener('click', () => {
-            inpGroqKey.type = (inpGroqKey.type === 'password') ? 'text' : 'password';
+            inpGeminiKey.type = (inpGeminiKey.type === 'password') ? 'text' : 'password';
         });
     }
 
-    if (btnTestGroq && inpGroqKey && aiTestResult) {
-        btnTestGroq.addEventListener('click', async () => {
-            const key = inpGroqKey.value.trim();
+    if (btnTestGemini && inpGeminiKey && aiTestResult) {
+        btnTestGemini.addEventListener('click', async () => {
+            const key = inpGeminiKey.value.trim();
             aiTestResult.style.display = 'block';
             aiTestResult.className = 'ai-test-alert loading';
-            aiTestResult.innerHTML = '⏳ Conectando ao cluster LPU da Groq (Llama 3.3 70B)...';
+            aiTestResult.innerHTML = '⏳ Conectando à API do Google Gemini...';
 
             try {
-                const res = await fetch('/api/test-groq', {
+                const res = await fetch('/api/test-gemini', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ apiKey: key })
@@ -567,13 +568,13 @@ function initEventListeners() {
         });
     }
 
-    if (btnSaveGroq && inpGroqKey && modalAi) {
-        btnSaveGroq.addEventListener('click', async () => {
-            const key = inpGroqKey.value.trim();
-            setGroqApiKey(key);
-            await checkGroqStatus();
+    if (btnSaveGemini && inpGeminiKey && modalAi) {
+        btnSaveGemini.addEventListener('click', async () => {
+            const key = inpGeminiKey.value.trim();
+            setGeminiApiKey(key);
+            await checkGeminiStatus();
             modalAi.style.display = 'none';
-            showToast(key ? '✨ Chave da Groq salva com sucesso! IA Ativa.' : 'Chave removida. Modo Heurístico ativado.');
+            showToast(key ? '✨ Chave do Google Gemini salva com sucesso! IA Ativa.' : 'Chave removida. Modo Heurístico ativado.');
         });
     }
 
@@ -912,7 +913,7 @@ async function handleGenerateMSEP() {
     try {
         const payload = {
             ...currentCourseData,
-            groqApiKey: getGroqApiKey()
+            geminiApiKey: getGeminiApiKey()
         };
 
         const response = await fetch('/api/generate-msep', {
@@ -929,7 +930,7 @@ async function handleGenerateMSEP() {
             goToStep(3);
 
             if (currentMsepPlan._generatedByAI) {
-                showToast(`✨ Plano MSEP gerado via IA Groq (Llama 3.3 70B) com ${currentMsepPlan.situacoes.length} SAs!`);
+                showToast(`✨ Plano MSEP gerado via ${currentMsepPlan._aiProvider || 'Google Gemini'} com ${currentMsepPlan.situacoes.length} SAs!`);
             } else {
                 showToast(`📋 Plano MSEP gerado com sucesso com ${currentMsepPlan.situacoes.length} SAs!`);
             }

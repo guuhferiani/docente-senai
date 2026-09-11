@@ -21,9 +21,9 @@
                 </div>
             </div>
             <div class="header-actions">
-                <button id="btn-ai-config" class="btn btn-outline btn-sm ai-header-btn" title="Configurar Inteligência Artificial (Groq / Llama 3.3 70B)">
+                <button id="btn-ai-config" class="btn btn-outline btn-sm ai-header-btn" title="Configurar Inteligência Artificial (Google Gemini)">
                     <span class="ai-pulse-dot" id="ai-header-dot"></span>
-                    <span id="ai-header-text">⚡ IA Groq</span>
+                    <span id="ai-header-text">⚡ IA Gemini</span>
                 </button>
                 <div class="status-pill" id="storage-status-pill" title="Todas as alterações são salvas automaticamente no seu navegador">
                     <span class="status-dot"></span>
@@ -436,7 +436,7 @@
         </div>
     </div>
 
-    <!-- Modern AI Configuration Modal (Groq Cloud) -->
+    <!-- Modern AI Configuration Modal (Google Gemini) -->
     <div id="modal-ai-config" class="modal-backdrop" style="display: none;">
         <div class="modal-container modal-lg" role="dialog" aria-modal="true">
             <div class="modal-header">
@@ -446,8 +446,8 @@
                     </svg>
                 </div>
                 <div class="modal-title-wrap">
-                    <h3>Configuração da Inteligência Artificial (Groq API)</h3>
-                    <p>Gere Situações de Aprendizagem e Critérios 100% dinâmicos e personalizados para qualquer curso do SENAI com o modelo <strong>Llama 3.3 70B</strong> em menos de 2 segundos.</p>
+                    <h3>Configuração da Inteligência Artificial (Google Gemini API)</h3>
+                    <p>Gere Situações de Aprendizagem e Critérios 100% dinâmicos e personalizados para qualquer curso do SENAI com o modelo oficial <strong>Google Gemini 2.5 Flash</strong> diretamente via Google AI Studio.</p>
                 </div>
             </div>
             <div class="modal-body" style="padding: 1.25rem 1.5rem;">
@@ -462,13 +462,13 @@
                 </div>
 
                 <div class="form-group" style="margin-top: 1.25rem;">
-                    <label for="inp-groq-key">Chave de API da Groq (GROQ_API_KEY)</label>
+                    <label for="inp-gemini-key">Chave de API do Google Gemini (GEMINI_API_KEY)</label>
                     <div class="key-input-wrap">
-                        <input type="password" id="inp-groq-key" class="form-control" placeholder="gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+                        <input type="password" id="inp-gemini-key" class="form-control" placeholder="AIzaSy_xxxxxxxxxxxxxxxxxxxxxxxxxxxx">
                         <button type="button" class="btn-toggle-key" id="btn-toggle-key" title="Mostrar/Ocultar chave">👁️</button>
                     </div>
                     <span class="form-hint" style="margin-top: 0.4rem; display: block;">
-                        🔑 Sua chave pode ser obtida gratuitamente em <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="color: var(--accent); font-weight: 600; text-decoration: underline;">console.groq.com/keys ↗</a>.
+                        🔑 Sua chave pode ser obtida gratuitamente em <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener" style="color: var(--accent); font-weight: 600; text-decoration: underline;">aistudio.google.com/app/apikey ↗</a>.
                     </span>
                 </div>
 
@@ -476,11 +476,11 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" id="btn-close-ai-modal">Fechar</button>
-                <button type="button" class="btn btn-outline" id="btn-test-groq-key">
+                <button type="button" class="btn btn-outline" id="btn-test-gemini-key">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
                     Testar Conexão
                 </button>
-                <button type="button" class="btn btn-primary" id="btn-save-groq-key">Salvar e Ativar</button>
+                <button type="button" class="btn btn-primary" id="btn-save-gemini-key">Salvar e Ativar</button>
             </div>
         </div>
     </div>

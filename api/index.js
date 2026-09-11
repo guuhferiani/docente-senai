@@ -151,8 +151,8 @@ const SAMPLE_COURSES = {
 };
 
 async function generateMSEPPlan(courseInfo) {
-    // Attempt Groq AI Generation first if Key is Available
-    const aiPlan = await generateWithGroq(courseInfo);
+    // Attempt Google Gemini AI Generation first if Key is Available
+    const aiPlan = await generateWithGemini(courseInfo);
     if (aiPlan && aiPlan.situacoes && aiPlan.situacoes.length > 0) {
         return aiPlan;
     }
@@ -336,10 +336,10 @@ function buildPresetPlan(preset, overrides) {
     return buildGenericDynamicPlan(overrides || preset);
 }
 
-// ⚡ Ultra-Fast Groq AI LPU Pedagogical Generator (Llama 3.3 70B)
-async function generateWithGroq(courseInfo) {
-    const apiKey = (courseInfo && courseInfo.groqApiKey) || process.env.GROQ_API_KEY;
-    if (!apiKey || apiKey === 'gsk_sua_chave_groq_aqui' || apiKey.trim().length < 10) {
+// ⚡ Google Gemini Pedagogical Generator (Gemini 2.5 Flash / Flash Lite)
+async function generateWithGemini(courseInfo) {
+    const apiKey = (courseInfo && (courseInfo.geminiApiKey || courseInfo.apiKey)) || process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === 'sua_chave_gemini_aqui' || apiKey.trim().length < 10) {
         return null;
     }
 
@@ -412,11 +412,10 @@ Retorne APENAS um JSON no seguinte formato:
   "situacoes": [ ... ]
 }`;
 
-    // Candidate models in order of capability and speed
-    const candidateModels = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "groq/compound-mini", "llama-3.3-70b-versatile"];
+    const candidateModels = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"];
 
     for (const modelName of candidateModels) {
-        const plan = await callGroqChat(apiKey, prompt, modelName);
+        const plan = await callGemini(apiKey, prompt, modelName);
         if (plan) {
             if (courseInfo.objetivoUC && courseInfo.objetivoUC.trim()) {
                 plan.objetivoUC = courseInfo.objetivoUC.trim();
@@ -431,30 +430,32 @@ Retorne APENAS um JSON no seguinte formato:
     return null;
 }
 
-function callGroqChat(apiKey, prompt, modelName) {
+function callGemini(apiKey, prompt, modelName) {
     const requestBody = JSON.stringify({
-        model: modelName,
-        messages: [
-            { role: "system", content: "Você é um Engenheiro Pedagógico Especialista do SENAI-SP com domínio completo do MSEP e do IRRAC. Responda exclusivamente com um JSON válido, sem comentários ou texto adicional fora do JSON." },
-            { role: "user", content: prompt }
+        contents: [
+            {
+                role: "user",
+                parts: [{ text: prompt }]
+            }
         ],
-        response_format: { type: "json_object" },
-        temperature: 0.3,
-        max_tokens: 4096
+        systemInstruction: {
+            parts: [{ text: "Você é um Engenheiro Pedagógico Especialista do SENAI-SP com domínio completo da Metodologia SENAI de Educação Profissional (MSEP), do Book MSEP e do IRRAC. Responda exclusivamente com um JSON válido conforme especificado, sem nenhum texto introdutório ou formatação externa." }]
+        },
+        generationConfig: {
+            temperature: 0.2,
+            responseMimeType: "application/json"
+        }
     });
 
     return new Promise((resolve) => {
-        const req = https.request({
-            hostname: 'api.groq.com',
-            port: 443,
-            path: '/openai/v1/chat/completions',
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey.trim()}`;
+        const req = https.request(url, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${apiKey.trim()}`,
                 'Content-Type': 'application/json',
                 'Content-Length': Buffer.byteLength(requestBody)
             },
-            timeout: 20000
+            timeout: 25000
         }, (res) => {
             let resData = '';
             res.on('data', chunk => { resData += chunk; });
@@ -462,9 +463,11 @@ function callGroqChat(apiKey, prompt, modelName) {
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                     try {
                         const parsed = JSON.parse(resData);
-                        let content = parsed.choices[0].message.content || '';
+                        let content = '';
+                        if (parsed.candidates && parsed.candidates[0] && parsed.candidates[0].content && parsed.candidates[0].content.parts) {
+                            content = parsed.candidates[0].content.parts[0].text || '';
+                        }
                         
-                        // Robust JSON extraction (strip ```json blocks if present)
                         content = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
                         const firstBrace = content.indexOf('{');
                         const lastBrace = content.lastIndexOf('}');
@@ -474,9 +477,8 @@ function callGroqChat(apiKey, prompt, modelName) {
 
                         const plan = JSON.parse(content);
                         plan._generatedByAI = true;
-                        plan._aiProvider = `Groq (${modelName})`;
+                        plan._aiProvider = `Google Gemini (${modelName})`;
                         
-                        // Ensure rows are numbered correctly
                         let globalRow = 15;
                         if (plan.situacoes && Array.isArray(plan.situacoes)) {
                             plan.situacoes.forEach(sa => {
@@ -490,24 +492,24 @@ function callGroqChat(apiKey, prompt, modelName) {
                         }
                         return resolve(plan);
                     } catch (e) {
-                        console.warn(`Groq JSON parse error for ${modelName}:`, e.message);
+                        console.warn(`Gemini JSON parse error for ${modelName}:`, e.message);
                         resolve(null);
                     }
                 } else {
-                    console.warn(`Groq API (${modelName}) returned status ${res.statusCode}:`, resData);
+                    console.warn(`Gemini API (${modelName}) returned status ${res.statusCode}:`, resData);
                     resolve(null);
                 }
             });
         });
 
         req.on('error', (err) => {
-            console.warn(`Groq request failed for ${modelName}:`, err.message);
+            console.warn(`Gemini request failed for ${modelName}:`, err.message);
             resolve(null);
         });
 
         req.on('timeout', () => {
             req.destroy();
-            console.warn(`Groq request timed out for ${modelName}`);
+            console.warn(`Gemini request timed out for ${modelName}`);
             resolve(null);
         });
 
@@ -516,38 +518,37 @@ function callGroqChat(apiKey, prompt, modelName) {
     });
 }
 
-// Test Groq API Key Connection
-async function testGroqConnection(keyToTest) {
-    const apiKey = (keyToTest && keyToTest.trim()) || process.env.GROQ_API_KEY;
-    if (!apiKey || apiKey === 'gsk_sua_chave_groq_aqui' || apiKey.trim().length < 10) {
+// Test Gemini API Key Connection
+async function testGeminiConnection(keyToTest) {
+    const apiKey = (keyToTest && keyToTest.trim()) || process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === 'sua_chave_gemini_aqui' || apiKey.trim().length < 10) {
         return { success: false, error: 'Chave de API não informada ou inválida.' };
     }
 
-    const testModels = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "groq/compound-mini", "llama-3.3-70b-versatile"];
+    const testModels = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-flash-latest"];
     for (const m of testModels) {
-        const res = await runModelPing(apiKey, m);
+        const res = await runGeminiPing(apiKey, m);
         if (res.success) return res;
     }
-    return { success: false, error: 'Não foi possível conectar a nenhum modelo da Groq.' };
+    return { success: false, error: 'Não foi possível conectar a nenhum modelo do Google Gemini.' };
 }
 
-function runModelPing(apiKey, modelName) {
+function runGeminiPing(apiKey, modelName) {
     const requestBody = JSON.stringify({
-        model: modelName,
-        messages: [
-            { role: "user", content: "Responda apenas com a palavra OK." }
+        contents: [
+            { role: "user", parts: [{ text: "Responda apenas com a palavra OK." }] }
         ],
-        max_tokens: 10
+        generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 10
+        }
     });
 
     return new Promise((resolve) => {
-        const req = https.request({
-            hostname: 'api.groq.com',
-            port: 443,
-            path: '/openai/v1/chat/completions',
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey.trim()}`;
+        const req = https.request(url, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${apiKey.trim()}`,
                 'Content-Type': 'application/json',
                 'Content-Length': Buffer.byteLength(requestBody)
             },
@@ -557,7 +558,7 @@ function runModelPing(apiKey, modelName) {
             res.on('data', chunk => { resData += chunk; });
             res.on('end', () => {
                 if (res.statusCode >= 200 && res.statusCode < 300) {
-                    resolve({ success: true, message: `Conexão com Groq LPU (${modelName}) validada com sucesso!` });
+                    resolve({ success: true, message: `Conexão com Google Gemini (${modelName}) validada com sucesso!` });
                 } else {
                     let errMsg = `Erro ${res.statusCode}`;
                     try {
@@ -575,7 +576,7 @@ function runModelPing(apiKey, modelName) {
 
         req.on('timeout', () => {
             req.destroy();
-            resolve({ success: false, error: 'Tempo limite esgotado ao conectar à Groq.' });
+            resolve({ success: false, error: 'Tempo limite esgotado ao conectar ao Google Gemini.' });
         });
 
         req.write(requestBody);
@@ -1109,17 +1110,17 @@ module.exports = (req, res) => {
     }
 
     if (isRoute('ai-status')) {
-        const hasEnvKey = !!(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.trim().length > 10 && process.env.GROQ_API_KEY !== 'gsk_sua_chave_groq_aqui');
+        const hasEnvKey = !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 10 && process.env.GEMINI_API_KEY !== 'sua_chave_gemini_aqui');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
-            groqConfigured: hasEnvKey,
-            model: 'openai/gpt-oss-120b',
-            provider: 'Groq Cloud LPU'
+            geminiConfigured: hasEnvKey,
+            model: 'gemini-3.5-flash-lite',
+            provider: 'Google Gemini'
         }));
         return;
     }
 
-    if (isRoute('test-groq')) {
+    if (isRoute('test-gemini') || isRoute('test-groq')) {
         let body = '';
         req.on('data', chunk => { body += chunk; });
         req.on('end', async () => {
@@ -1129,7 +1130,7 @@ module.exports = (req, res) => {
                     const data = JSON.parse(body);
                     parsedKey = data.apiKey;
                 }
-                const result = await testGroqConnection(parsedKey);
+                const result = await testGeminiConnection(parsedKey);
                 res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(result));
             } catch (err) {
