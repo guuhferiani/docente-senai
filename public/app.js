@@ -84,11 +84,11 @@ async function updateModalAiStatus() {
 let currentStep = 1;
 let currentCourseData = {
     courseKey: "custom",
-    courseName: "",
-    courseUnit: "",
+    courseName: "",             // Nome do Curso Matriz / Habilitação Profissional
+    courseUnit: "",             // Nome da Unidade Curricular específica
     unitSigla: "",
-    cursoTipo: "tecnico",       // 'tecnico' | 'cai' | 'fic'
-    duracaoAula: 45,            // 45 para Cursos Regulares (Técnico e CAI) ou 60 para FIC
+    cursoTipo: "tecnico",       // 'tecnico' | 'cai' | 'fic' | 'superior'
+    duracaoAula: 45,            // 45 para Técnico; 60 para CAI, FIC e Superior
     numAulas: "",               // Ex: "107 aulas de 45 minutos cada"
     modalidade: "presencial",   // 'presencial' | 'semipresencial'
     aulasPresenciais: "",
@@ -99,9 +99,16 @@ let currentCourseData = {
     semAno: "",
     docente: "",
     escola: 'Escola SENAI "Mariano Ferraz"',
-    fileName: null
+    fileName: null,
+    detectedUCs: [],            // UCs extraídas da matriz do curso
+    semestresEstrutura: null,    // 3 ou 4 semestres
+    hasRemotoEstrutura: false
 };
 let currentMsepPlan = null;
+
+function getDefaultDurationForTipo(tipo) {
+    return (tipo === 'tecnico') ? 45 : 60;
+}
 
 // ==============================================================================
 // Pedagogical Hours & Classes Conversion Helpers (Book MSEP)
@@ -118,7 +125,8 @@ function updateClassCalculationUI() {
     const hours = inpWorkload && inpWorkload.value ? parseInt(inpWorkload.value) : 0;
     
     const selectDuracao = document.getElementById('select-duracao-aula');
-    const duracao = selectDuracao ? parseInt(selectDuracao.value) : (currentCourseData.duracaoAula || 45);
+    const defaultDur = getDefaultDurationForTipo(currentCourseData.cursoTipo || 'tecnico');
+    const duracao = selectDuracao ? parseInt(selectDuracao.value) : (currentCourseData.duracaoAula || defaultDur);
     
     const badge = document.getElementById('badge-calc-result');
     const explanation = document.getElementById('calc-explanation-text');
@@ -131,7 +139,7 @@ function updateClassCalculationUI() {
             badge.style.borderColor = "#cbd5e1";
         }
         if (explanation) {
-            explanation.innerHTML = `Cursos regulares (Técnico e CAI) são calculados em <strong>aulas de 45 minutos</strong>. Cursos FIC utilizam <strong>aulas de 60 minutos</strong>.`;
+            explanation.innerHTML = `Cursos Técnicos são calculados em <strong>aulas de 45 minutos</strong>. Cursos CAI (Aprendizagem), FIC e Superior utilizam <strong>aulas de 60 minutos</strong>.`;
         }
         updateEadBreakdownSummary(0);
         return;
@@ -158,12 +166,167 @@ function updateClassCalculationUI() {
         badge.style.borderColor = "#a7f3d0";
     }
 
-    const tipoLabel = (currentCourseData.cursoTipo === 'fic') ? 'FIC (Formação Inicial)' : (currentCourseData.cursoTipo === 'cai' ? 'CAI (Aprendizagem)' : 'Técnico de Nível Médio');
+    const tipoLabels = {
+        tecnico: 'Curso Técnico (45 min)',
+        cai: 'Aprendizagem Industrial - CAI (60 min)',
+        fic: 'Formação Inicial e Continuada - FIC (60 min)',
+        superior: 'Ensino Superior (60 min)'
+    };
+    const tipoLabel = tipoLabels[currentCourseData.cursoTipo] || 'Oficial SENAI';
     if (explanation) {
         explanation.innerHTML = `Equivalência Oficial MSEP (${tipoLabel}): ${hours}h × 60 min ÷ ${duracao} min = <strong>${totalAulas} aulas</strong> no Plano de Ensino.`;
     }
 
     updateEadBreakdownSummary(totalAulas);
+}
+
+// Condicional de Campos (Ajuste 2: IRRAC exclusivo para FIC; SGE para CAI/CT/Superior)
+function applyModalityConditionals(tipo) {
+    const isFic = (tipo === 'fic');
+    const badgeSigla = document.getElementById('badge-sigla-fic-only');
+    const helpSigla = document.getElementById('help-unit-sigla');
+    const inpSigla = document.getElementById('inp-unit-sigla');
+
+    if (inpSigla) {
+        if (isFic) {
+            inpSigla.placeholder = "Ex: DEV-SIST ou BANC-DADOS";
+            if (badgeSigla) badgeSigla.style.display = 'inline-block';
+            if (helpSigla) helpSigla.style.display = 'none';
+        } else {
+            inpSigla.placeholder = "(Opcional - Cursos regulares usam diário do SGE)";
+            if (badgeSigla) badgeSigla.style.display = 'none';
+            if (helpSigla) helpSigla.style.display = 'block';
+        }
+    }
+
+    // Step 4 IRRAC Export Card
+    const cardIrrac = document.getElementById('card-export-irrac');
+    const noticeIrrac = document.getElementById('irrac-notice-banner');
+    const btnIrrac = document.getElementById('btn-download-xlsx');
+
+    if (cardIrrac && btnIrrac) {
+        if (isFic) {
+            cardIrrac.classList.remove('disabled');
+            if (noticeIrrac) noticeIrrac.style.display = 'none';
+            btnIrrac.disabled = false;
+            btnIrrac.title = "Baixar Planilha IRRAC Oficial (.xlsx)";
+        } else {
+            cardIrrac.classList.add('disabled');
+            if (noticeIrrac) noticeIrrac.style.display = 'block';
+            btnIrrac.disabled = true;
+            btnIrrac.title = "Planilha IRRAC exclusiva para FIC. Cursos regulares utilizam diário do SGE.";
+        }
+    }
+}
+
+// Render dynamic clickable UC chips
+function renderUCChips() {
+    const wrapper = document.getElementById('uc-selection-wrapper');
+    const container = document.getElementById('uc-chips-container');
+    const badgeEstrutura = document.getElementById('uc-structure-badge');
+
+    if (!wrapper || !container) return;
+
+    if (!currentCourseData.detectedUCs || currentCourseData.detectedUCs.length === 0) {
+        wrapper.style.display = 'none';
+        return;
+    }
+
+    wrapper.style.display = 'block';
+
+    // Show course structure (3 vs 4 semestres, EaD)
+    if (badgeEstrutura) {
+        if (currentCourseData.semestresEstrutura) {
+            badgeEstrutura.style.display = 'inline-flex';
+            const eadText = currentCourseData.hasRemotoEstrutura ? ' • com EaD / Remoto' : '';
+            badgeEstrutura.textContent = `Estrutura: ${currentCourseData.semestresEstrutura} Semestres${eadText}`;
+        } else {
+            badgeEstrutura.style.display = 'none';
+        }
+    }
+
+    container.innerHTML = currentCourseData.detectedUCs.map((uc, idx) => {
+        const isSelected = (currentCourseData.courseUnit && currentCourseData.courseUnit.toLowerCase() === uc.nome.toLowerCase());
+        const hasEad = (uc.remotoHoras && uc.remotoHoras > 0) || uc.hasRemoto;
+        return `
+            <div class="uc-chip ${isSelected ? 'active' : ''}" data-uc-idx="${idx}">
+                <span class="uc-chip-name">${uc.nome}</span>
+                <span class="uc-chip-hours">${uc.cargaHoraria}h</span>
+                ${hasEad ? `<span class="uc-chip-badge-ead">EaD ${uc.remotoHoras ? `(${uc.remotoHoras}h)` : ''}</span>` : ''}
+            </div>
+        `;
+    }).join('');
+
+    container.querySelectorAll('.uc-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            const idx = parseInt(chip.getAttribute('data-uc-idx'));
+            const uc = currentCourseData.detectedUCs[idx];
+            if (uc) {
+                selectCourseUnit(uc);
+                showToast(`UC selecionada: "${uc.nome}" (${uc.cargaHoraria}h)`);
+            }
+        });
+    });
+}
+
+// Select a UC from detected list
+function selectCourseUnit(uc) {
+    if (!uc || !uc.nome) return;
+    currentCourseData.courseUnit = uc.nome;
+    currentCourseData.workload = uc.cargaHoraria || 80;
+    currentCourseData.unitSigla = generateSigla(uc.nome);
+
+    // Populate input fields
+    const inpUnit = document.getElementById('inp-course-unit');
+    if (inpUnit) inpUnit.value = uc.nome;
+
+    const inpWorkload = document.getElementById('inp-workload');
+    if (inpWorkload) inpWorkload.value = uc.cargaHoraria || 80;
+
+    const inpSigla = document.getElementById('inp-unit-sigla');
+    if (inpSigla) inpSigla.value = currentCourseData.unitSigla;
+
+    // Check remote hours (Ajuste 4)
+    const hasRemote = (uc.remotoHoras && uc.remotoHoras > 0) || uc.hasRemoto;
+    const btnModPresencial = document.getElementById('btn-mod-presencial');
+    const btnModSemipresencial = document.getElementById('btn-mod-semipresencial');
+    const eadBox = document.getElementById('ead-breakdown-box');
+
+    if (hasRemote) {
+        currentCourseData.modalidade = 'semipresencial';
+        if (btnModSemipresencial) btnModSemipresencial.classList.add('active');
+        if (btnModPresencial) btnModPresencial.classList.remove('active');
+        if (eadBox) eadBox.style.display = 'block';
+
+        const totalAulas = calculateClasses(uc.cargaHoraria, currentCourseData.duracaoAula || 45);
+        const eadHours = uc.remotoHoras || Math.round(uc.cargaHoraria * 0.2);
+        const eadAulas = calculateClasses(eadHours, currentCourseData.duracaoAula || 45);
+        const presAulas = Math.max(0, totalAulas - eadAulas);
+
+        currentCourseData.aulasEad = eadAulas;
+        currentCourseData.aulasPresenciais = presAulas;
+
+        const inpPres = document.getElementById('inp-aulas-presenciais');
+        const inpEad = document.getElementById('inp-aulas-ead');
+        if (inpPres) inpPres.value = presAulas;
+        if (inpEad) inpEad.value = eadAulas;
+    } else {
+        currentCourseData.modalidade = 'presencial';
+        if (btnModPresencial) btnModPresencial.classList.add('active');
+        if (btnModSemipresencial) btnModSemipresencial.classList.remove('active');
+        if (eadBox) eadBox.style.display = 'none';
+
+        currentCourseData.aulasEad = '';
+        currentCourseData.aulasPresenciais = '';
+        const inpPres = document.getElementById('inp-aulas-presenciais');
+        const inpEad = document.getElementById('inp-aulas-ead');
+        if (inpPres) inpPres.value = '';
+        if (inpEad) inpEad.value = '';
+    }
+
+    renderUCChips();
+    updateClassCalculationUI();
+    saveToLocalStorage();
 }
 
 function updateEadBreakdownSummary(totalAulas) {
@@ -376,7 +539,7 @@ function initEventListeners() {
 
     // Step 2 live input listeners for real-time saving
     const step2Inputs = [
-        'inp-course-name', 'inp-unit-sigla', 'inp-workload', 'inp-school',
+        'inp-course-name', 'inp-course-unit', 'inp-unit-sigla', 'inp-workload', 'inp-school',
         'inp-docente', 'inp-turma', 'inp-sem-ano', 'inp-objetivo-uc',
         'inp-aulas-presenciais', 'inp-aulas-ead'
     ];
@@ -393,7 +556,7 @@ function initEventListeners() {
         }
     });
 
-    // Course Type Card Selection (Técnico / CAI / FIC)
+    // Course Type Card Selection (Técnico / CAI / FIC / Superior)
     document.querySelectorAll('.course-type-card').forEach(card => {
         card.addEventListener('click', () => {
             const radio = card.querySelector('input[type="radio"]');
@@ -404,11 +567,13 @@ function initEventListeners() {
                 card.classList.add('active');
                 currentCourseData.cursoTipo = val;
                 
+                const defaultDur = getDefaultDurationForTipo(val);
                 const selectDuracao = document.getElementById('select-duracao-aula');
                 if (selectDuracao) {
-                    selectDuracao.value = (val === 'fic') ? '60' : '45';
-                    currentCourseData.duracaoAula = parseInt(selectDuracao.value);
+                    selectDuracao.value = String(defaultDur);
+                    currentCourseData.duracaoAula = defaultDur;
                 }
+                applyModalityConditionals(val);
                 updateClassCalculationUI();
                 syncCourseDataFromInputs();
                 saveToLocalStorage();
@@ -635,7 +800,10 @@ function resetFormToBlank() {
         semAno: auto.formatted,
         docente: "",
         escola: 'Escola SENAI "Mariano Ferraz"',
-        fileName: null
+        fileName: null,
+        detectedUCs: [],
+        semestresEstrutura: null,
+        hasRemotoEstrutura: false
     };
     currentMsepPlan = null;
     populateStep2Inputs();
@@ -644,7 +812,12 @@ function resetFormToBlank() {
 
 // Populate Step 2 Inputs from state
 function populateStep2Inputs() {
-    document.getElementById('inp-course-name').value = currentCourseData.courseName || '';
+    const inpName = document.getElementById('inp-course-name');
+    if (inpName) inpName.value = currentCourseData.courseName || '';
+
+    const inpUnit = document.getElementById('inp-course-unit');
+    if (inpUnit) inpUnit.value = currentCourseData.courseUnit || '';
+
     document.getElementById('inp-unit-sigla').value = currentCourseData.unitSigla || '';
     document.getElementById('inp-workload').value = currentCourseData.workload || '';
     document.getElementById('inp-school').value = currentCourseData.escola || 'Escola SENAI "Mariano Ferraz"';
@@ -655,7 +828,7 @@ function populateStep2Inputs() {
     const inpObj = document.getElementById('inp-objetivo-uc');
     if (inpObj) inpObj.value = currentCourseData.objetivoUC || '';
 
-    // Course Type Radio Cards (Técnico / CAI / FIC)
+    // Course Type Radio Cards (Técnico / CAI / FIC / Superior)
     const selectedTipo = currentCourseData.cursoTipo || 'tecnico';
     document.querySelectorAll('.course-type-card').forEach(card => {
         const radio = card.querySelector('input[type="radio"]');
@@ -670,7 +843,7 @@ function populateStep2Inputs() {
     // Duração da aula
     const selectDuracao = document.getElementById('select-duracao-aula');
     if (selectDuracao) {
-        selectDuracao.value = String(currentCourseData.duracaoAula || (selectedTipo === 'fic' ? 60 : 45));
+        selectDuracao.value = String(currentCourseData.duracaoAula || getDefaultDurationForTipo(selectedTipo));
     }
 
     // Modalidade (Presencial vs Semipresencial)
@@ -751,8 +924,14 @@ function populateStep2Inputs() {
 
     const badge = document.getElementById('selected-course-badge');
     if (badge) {
-        badge.textContent = currentCourseData.unitSigla ? `UC: ${currentCourseData.unitSigla}` : (currentCourseData.courseName ? currentCourseData.courseName : 'Novo Curso');
+        badge.textContent = currentCourseData.unitSigla ? `UC: ${currentCourseData.unitSigla}` : (currentCourseData.courseUnit ? currentCourseData.courseUnit : (currentCourseData.courseName ? currentCourseData.courseName : 'Novo Curso'));
     }
+
+    // Render detected UCs if available
+    renderUCChips();
+
+    // Apply modality conditionals (IRRAC disabled for CAI/Técnico)
+    applyModalityConditionals(selectedTipo);
 
     // Refresh real-time hours to class conversion
     updateClassCalculationUI();
@@ -761,7 +940,7 @@ function populateStep2Inputs() {
 // Sync inputs to currentCourseData
 function syncCourseDataFromInputs() {
     currentCourseData.courseName = document.getElementById('inp-course-name')?.value.trim() || '';
-    currentCourseData.courseUnit = document.getElementById('inp-course-name')?.value.trim() || '';
+    currentCourseData.courseUnit = document.getElementById('inp-course-unit')?.value.trim() || currentCourseData.courseUnit || currentCourseData.courseName;
     currentCourseData.unitSigla = document.getElementById('inp-unit-sigla')?.value.trim() || '';
     const rawHours = document.getElementById('inp-workload')?.value;
     currentCourseData.workload = rawHours ? parseInt(rawHours) : '';
@@ -772,7 +951,7 @@ function syncCourseDataFromInputs() {
 
     // Duração e Aulas
     const selectDuracao = document.getElementById('select-duracao-aula');
-    currentCourseData.duracaoAula = selectDuracao ? parseInt(selectDuracao.value) : (currentCourseData.cursoTipo === 'fic' ? 60 : 45);
+    currentCourseData.duracaoAula = selectDuracao ? parseInt(selectDuracao.value) : getDefaultDurationForTipo(currentCourseData.cursoTipo);
     
     currentCourseData.aulasPresenciais = document.getElementById('inp-aulas-presenciais')?.value.trim() || '';
     currentCourseData.aulasEad = document.getElementById('inp-aulas-ead')?.value.trim() || '';
@@ -817,33 +996,98 @@ function generateSigla(name) {
     return upper.substring(0, 8).toUpperCase();
 }
 
-// Handle Custom File Upload
+// Handle Custom File Upload with AI Parsing & UC Detection
 function handleFileUpload(file) {
     const fileName = file.name;
     const fileSizeKB = Math.round(file.size / 1024);
-    
     const cleanName = fileName.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ").trim();
     
     currentCourseData.fileName = fileName;
     currentCourseData.courseKey = 'custom';
     currentCourseData.courseName = cleanName.toUpperCase();
-    currentCourseData.courseUnit = cleanName.toUpperCase();
-    currentCourseData.unitSigla = generateSigla(cleanName);
+    currentCourseData.courseUnit = '';
+    currentCourseData.unitSigla = '';
     currentCourseData.workload = "";
-    currentCourseData.turma = "";
-    currentCourseData.semAno = "";
-    currentCourseData.docente = "";
-    currentCourseData.escola = 'Escola SENAI "Mariano Ferraz"';
+    currentCourseData.detectedUCs = [];
+    currentCourseData.semestresEstrutura = null;
+    currentCourseData.hasRemotoEstrutura = false;
     
-    populateStep2Inputs();
-    updateStep1FileCard(fileSizeKB);
-    saveToLocalStorage();
+    updateStep1FileCard(fileSizeKB, '⏳ Analisando Plano de Curso com IA (detectando nível, estrutura e UCs)...');
+    showToast(`Carregando "${fileName}" e analisando matriz curricular...`);
 
-    showToast(`Plano de Curso "${fileName}" anexado! Informe a carga horária no Passo 2.`);
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            const base64Data = e.target.result.split(',')[1];
+            const response = await fetch('/api/parse-course-plan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    fileName: fileName,
+                    fileData: base64Data,
+                    apiKey: getGeminiApiKey()
+                })
+            });
+
+            if (response.ok) {
+                const parsed = await response.json();
+                if (parsed.cursoNome) {
+                    currentCourseData.courseName = parsed.cursoNome;
+                }
+                if (parsed.cursoTipo) {
+                    currentCourseData.cursoTipo = parsed.cursoTipo;
+                    currentCourseData.duracaoAula = getDefaultDurationForTipo(parsed.cursoTipo);
+                }
+                currentCourseData.semestresEstrutura = parsed.semestres;
+                currentCourseData.hasRemotoEstrutura = !!(parsed.hasRemoto || parsed.hasRemoteHours);
+
+                if (parsed.unidades && Array.isArray(parsed.unidades) && parsed.unidades.length > 0) {
+                    currentCourseData.detectedUCs = parsed.unidades;
+                    // Auto-select the first UC from matrix
+                    selectCourseUnit(parsed.unidades[0]);
+                } else {
+                    currentCourseData.detectedUCs = [];
+                    currentCourseData.courseUnit = cleanName;
+                    currentCourseData.unitSigla = generateSigla(cleanName);
+                }
+
+                populateStep2Inputs();
+                updateStep1FileCard(fileSizeKB);
+                saveToLocalStorage();
+
+                const tipoNames = {
+                    tecnico: 'Curso Técnico (45 min/aula)',
+                    cai: 'Aprendizagem Industrial - CAI (60 min/aula)',
+                    fic: 'Formação Inicial - FIC (60 min/aula)',
+                    superior: 'Ensino Superior (60 min/aula)'
+                };
+                const detectedName = tipoNames[currentCourseData.cursoTipo] || currentCourseData.cursoTipo;
+                const ucCount = currentCourseData.detectedUCs.length;
+                const ucMsg = ucCount > 0 ? ` • ${ucCount} Unidades Curriculares detectadas` : '';
+                showToast(`✅ Identificado: ${detectedName}${ucMsg}!`);
+            } else {
+                throw new Error('Falha ao processar arquivo no servidor');
+            }
+        } catch (err) {
+            console.warn('Fallback after parse error:', err);
+            currentCourseData.courseUnit = cleanName;
+            currentCourseData.unitSigla = generateSigla(cleanName);
+            populateStep2Inputs();
+            updateStep1FileCard(fileSizeKB);
+            saveToLocalStorage();
+            showToast(`Plano anexado! Revise os dados no Passo 2.`);
+        }
+    };
+    reader.onerror = function() {
+        populateStep2Inputs();
+        updateStep1FileCard(fileSizeKB);
+        saveToLocalStorage();
+    };
+    reader.readAsDataURL(file);
 }
 
 // Update Step 1 File Preview Card
-function updateStep1FileCard(fileSizeKB = null) {
+function updateStep1FileCard(fileSizeKB = null, statusMsg = null) {
     const card = document.getElementById('attached-file-card');
     const nameEl = document.getElementById('attached-file-name');
     const sizeEl = document.getElementById('attached-file-size');
@@ -852,9 +1096,9 @@ function updateStep1FileCard(fileSizeKB = null) {
     if (currentCourseData.fileName) {
         card.style.display = 'flex';
         nameEl.textContent = currentCourseData.fileName;
-        sizeEl.textContent = fileSizeKB ? `${fileSizeKB} KB • Documento pronto para processamento` : `Documento carregado`;
+        sizeEl.textContent = statusMsg || (fileSizeKB ? `${fileSizeKB} KB • Documento pronto para processamento` : `Documento carregado`);
         if (labelEl) {
-            labelEl.textContent = `${currentCourseData.fileName} (${currentCourseData.courseName})`;
+            labelEl.textContent = `${currentCourseData.fileName} (${currentCourseData.courseName || 'Processado'})`;
         }
     } else {
         card.style.display = 'none';
@@ -867,6 +1111,9 @@ function updateStep1FileCard(fileSizeKB = null) {
 // Remove attached file
 function handleRemoveAttachedFile() {
     currentCourseData.fileName = null;
+    currentCourseData.detectedUCs = [];
+    currentCourseData.semestresEstrutura = null;
+    currentCourseData.hasRemotoEstrutura = false;
     const fileInput = document.getElementById('file-input');
     if (fileInput) fileInput.value = '';
     updateStep1FileCard();
@@ -879,19 +1126,23 @@ async function handleGenerateMSEP() {
     syncCourseDataFromInputs();
 
     if (!currentCourseData.courseName) {
-        showToast('Por favor, informe o Nome do Curso / Unidade Curricular.');
+        showToast('Por favor, informe o Nome do Curso Matriz / Habilitação.');
         document.getElementById('inp-course-name').focus();
         return;
     }
 
+    if (!currentCourseData.courseUnit) {
+        currentCourseData.courseUnit = document.getElementById('inp-course-unit')?.value.trim() || currentCourseData.courseName;
+    }
+
     if (!currentCourseData.workload || isNaN(currentCourseData.workload) || currentCourseData.workload <= 0) {
-        showToast('Por favor, informe a Carga Horária Total da UC (ex: 80, 120, 160h).');
+        showToast('Por favor, informe a Carga Horária da UC (ex: 60, 80, 120h).');
         document.getElementById('inp-workload').focus();
         return;
     }
 
     if (!currentCourseData.unitSigla) {
-        currentCourseData.unitSigla = generateSigla(currentCourseData.courseName);
+        currentCourseData.unitSigla = generateSigla(currentCourseData.courseUnit || currentCourseData.courseName);
         document.getElementById('inp-unit-sigla').value = currentCourseData.unitSigla;
     }
 
@@ -1301,11 +1552,17 @@ function renderExportAndDocView() {
 
     const docContainer = document.getElementById('printable-doc-content');
 
-    const tipoLabel = (currentMsepPlan.cursoTipo === 'fic' || currentCourseData.cursoTipo === 'fic')
-        ? 'Formação Inicial e Continuada (FIC)'
-        : ((currentMsepPlan.cursoTipo === 'cai' || currentCourseData.cursoTipo === 'cai')
-            ? 'Aprendizagem Industrial (CAI)'
-            : 'Curso Técnico de Nível Médio');
+    const activeTipo = currentMsepPlan.cursoTipo || currentCourseData.cursoTipo || 'tecnico';
+    const tipoLabels = {
+        tecnico: 'Curso Técnico de Nível Médio',
+        cai: 'Curso de Aprendizagem Industrial (CAI)',
+        fic: 'Formação Inicial e Continuada (FIC)',
+        superior: 'Ensino Superior (Graduação / Tecnologia)'
+    };
+    const tipoLabel = tipoLabels[activeTipo] || 'Curso Técnico';
+
+    // Apply modality conditionals (disable IRRAC for CAI/CT)
+    applyModalityConditionals(activeTipo);
 
     const modalidadeLabel = (currentMsepPlan.modalidade === 'semipresencial' || currentCourseData.modalidade === 'semipresencial')
         ? 'Semipresencial (com EaD)'
@@ -1324,7 +1581,7 @@ function renderExportAndDocView() {
                 <td style="width: 35%;"><strong>Nível / Tipo:</strong> ${tipoLabel}</td>
             </tr>
             <tr>
-                <td style="width: 65%;"><strong>Unidade Curricular (UC):</strong> ${currentMsepPlan.unidade}</td>
+                <td style="width: 65%;"><strong>Unidade Curricular (UC):</strong> ${currentMsepPlan.unidade || currentMsepPlan.curso}</td>
                 <td style="width: 35%;"><strong>Modalidade:</strong> ${modalidadeLabel}</td>
             </tr>
             <tr>
@@ -1473,12 +1730,19 @@ function renderExportAndDocView() {
 
 // Download IRRAC XLSX File
 async function handleDownloadIRRAC() {
+    const activeTipo = currentCourseData.cursoTipo || currentMsepPlan?.cursoTipo;
+    if (activeTipo !== 'fic') {
+        showToast('⚠️ A planilha IRRAC é exclusiva para cursos FIC. Cursos CAI e Técnicos utilizam o diário de classe do SGE.');
+        return;
+    }
+
     syncMsepPlanFromUI();
     saveToLocalStorage();
     showToast('Compilando planilha XLSX oficial...');
 
     const payload = {
         courseName: currentMsepPlan.curso,
+        courseUnit: currentMsepPlan.unidade || currentMsepPlan.curso,
         unitSigla: currentMsepPlan.sigla,
         workload: currentMsepPlan.cargaHoraria,
         turma: currentMsepPlan.turma,
@@ -1496,16 +1760,23 @@ async function handleDownloadIRRAC() {
         });
 
         if (response.ok) {
+            let downloadFilename = `IRRAC - ${currentMsepPlan.sigla || 'CURSO'}.xlsx`;
+            const disposition = response.headers.get('Content-Disposition');
+            if (disposition && disposition.includes('filename=')) {
+                const match = disposition.match(/filename="?([^"]+)"?/);
+                if (match && match[1]) downloadFilename = match[1];
+            }
+
             const blob = await response.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.style.display = 'none';
             a.href = url;
-            a.download = `IRRAC - ${currentMsepPlan.sigla}.xlsx`;
+            a.download = downloadFilename;
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(url);
-            showToast(`Planilha "IRRAC - ${currentMsepPlan.sigla}.xlsx" baixada com sucesso!`);
+            showToast(`Planilha "${downloadFilename}" baixada com sucesso!`);
         } else {
             throw new Error('Falha ao compilar XLSX');
         }

@@ -3,6 +3,11 @@ const path = require('path');
 const https = require('https');
 const AdmZip = require('adm-zip');
 const templateBase64 = require('../template_base64');
+const { extractPdfText, parseCoursePlanHeuristic, parseCoursePlanWithGemini } = require('./pdfExtractor');
+
+function getDefaultDuration(tipo) {
+    return (tipo === 'tecnico') ? 45 : 60;
+}
 
 // Load environment variables from .env if present (Local / Self-hosted)
 try {
@@ -177,7 +182,7 @@ function buildPresetPlan(preset, overrides) {
 
     const totalHours = overrides.workload || preset.workload;
     const cursoTipo = overrides.cursoTipo || 'tecnico';
-    const duracao = parseInt(overrides.duracaoAula) || (cursoTipo === 'fic' ? 60 : 45);
+    const duracao = parseInt(overrides.duracaoAula) || getDefaultDuration(cursoTipo);
     const totalAulas = Math.round((totalHours * 60) / duracao);
     let numAulasText = `${totalAulas} aulas de ${duracao} minutos cada`;
     if (overrides.modalidade === 'semipresencial' && (overrides.aulasPresenciais || overrides.aulasEad)) {
@@ -345,13 +350,16 @@ async function generateWithGemini(courseInfo) {
 
     const totalHours = parseInt(courseInfo.workload) || 40;
     const courseName = courseInfo.courseName || "Curso Técnico";
+    const courseUnit = courseInfo.courseUnit || courseName;
     const sigla = courseInfo.unitSigla || "CURSO";
     const cursoTipo = courseInfo.cursoTipo || "tecnico";
-    const duracaoAula = parseInt(courseInfo.duracaoAula) || (cursoTipo === 'fic' ? 60 : 45);
+    const duracaoAula = parseInt(courseInfo.duracaoAula) || getDefaultDuration(cursoTipo);
     const totalAulas = Math.round((totalHours * 60) / duracaoAula);
     const tipoLabel = (cursoTipo === 'cai')
-        ? 'Curso Regular de Aprendizagem Industrial (CAI)'
-        : (cursoTipo === 'fic' ? 'Formação Inicial e Continuada (FIC)' : 'Curso Técnico de Nível Médio (Cursos Regulares)');
+        ? 'Curso de Aprendizagem Industrial (CAI)'
+        : (cursoTipo === 'fic'
+            ? 'Formação Inicial e Continuada (FIC)'
+            : (cursoTipo === 'superior' ? 'Ensino Superior (Graduação / Tecnologia / Pós)' : 'Curso Técnico de Nível Médio'));
     const modalidadeLabel = (courseInfo.modalidade === 'semipresencial')
         ? `Semipresencial (${courseInfo.aulasPresenciais || 0} aulas presenciais e ${courseInfo.aulasEad || 0} aulas EaD / não presenciais)`
         : '100% Presencial';
@@ -359,7 +367,8 @@ async function generateWithGemini(courseInfo) {
     const prompt = `Você é um Engenheiro Pedagógico Especialista do SENAI-SP com domínio completo da Metodologia SENAI de Educação Profissional (MSEP), do Book MSEP e do Instrumento de Registro de Resultados da Avaliação com Critérios (IRRAC).
 
 Gere um Plano de Ensino MSEP Modular para o seguinte curso:
-- Curso / Unidade Curricular: "${courseName}"
+- Curso Matriz / Habilitação Profissional: "${courseName}"
+- Unidade Curricular (UC a ser planejada): "${courseUnit}"
 - Nível / Tipo de Curso: "${tipoLabel}"
 - Modalidade: "${modalidadeLabel}"
 - Sigla da UC: "${sigla}"
@@ -376,7 +385,7 @@ Diretrizes Rigorosas do SENAI MSEP (Diretrizes Oficiais dos Prompts MSEP):
 3. A soma exata do campo 'aulas' de todas as SAs DEVE SER EXATAMENTE IGUAL a ${totalHours} horas.
 4. Para cada SA:
    - 'numero': "01", "02", etc.
-   - 'titulo': Título prático e estimulante contextualizado no mercado de trabalho industrial.
+   - 'titulo': Título prático e estimulante contextualizado no mercado de trabalho industrial focado na Unidade Curricular "${courseUnit}".
    - 'aulas': Quantidade de horas (inteiro).
    - 'estrategiaTipo': 'Situação-problema', 'Projeto', 'Estudo de caso' ou 'Pesquisa aplicada' (conforme sugerido no Book MSEP).
    - 'capacidadesTecnicas': Array com 2 a 4 capacidades técnicas completas sem abreviações.
@@ -397,7 +406,7 @@ Diretrizes Rigorosas do SENAI MSEP (Diretrizes Oficiais dos Prompts MSEP):
 Retorne APENAS um JSON no seguinte formato:
 {
   "curso": "${courseName}",
-  "unidade": "${courseInfo.courseUnit || courseName}",
+  "unidade": "${courseUnit}",
   "sigla": "${sigla}",
   "cursoTipo": "${cursoTipo}",
   "duracaoAula": ${duracaoAula},
@@ -417,6 +426,8 @@ Retorne APENAS um JSON no seguinte formato:
     for (const modelName of candidateModels) {
         const plan = await callGemini(apiKey, prompt, modelName);
         if (plan) {
+            plan.curso = courseName;
+            plan.unidade = courseUnit;
             if (courseInfo.objetivoUC && courseInfo.objetivoUC.trim()) {
                 plan.objetivoUC = courseInfo.objetivoUC.trim();
             }
@@ -587,8 +598,9 @@ function runGeminiPing(apiKey, modelName) {
 function buildGenericDynamicPlan(courseInfo) {
     const totalHours = parseInt(courseInfo.workload) || 40;
     const courseName = courseInfo.courseName || "Curso Técnico de Formação";
+    const courseUnit = courseInfo.courseUnit || courseName;
     const sigla = courseInfo.unitSigla || "CURSO";
-    const nameLower = courseName.toLowerCase();
+    const nameLower = `${courseName} ${courseUnit}`.toLowerCase();
 
     // Domain heuristic profiles (strict word boundaries to avoid false positives like "confeitaria" or "marcenaria")
     let domain = "general";
@@ -822,13 +834,13 @@ function buildGenericDynamicPlan(courseInfo) {
 
         situacoes.push({
             numero: saNum,
-            titulo: `Situação de Aprendizagem ${saNum} - ${i === 1 ? 'Fundamentação e Planejamento' : (i === numSAs ? 'Integração Final e Validação Técnica' : 'Desenvolvimento Prático')} de ${courseName}`,
+            titulo: `Situação de Aprendizagem ${saNum} - ${i === 1 ? 'Fundamentação e Planejamento' : (i === numSAs ? 'Integração Final e Validação Técnica' : 'Desenvolvimento Prático')} de ${courseUnit}`,
             aulas: hoursForSA,
             estrategiaTipo: (i === 1) ? "Situação-problema" : (i === numSAs ? "Estudo de caso / Projeto Integrador" : "Projeto"),
             capacidadesTecnicas: assignedCaps,
             capacidadesSocioemocionais: [socioCap],
-            conhecimentos: cfg.conhecimentos || [`Fundamentos e procedimentos técnicos de ${courseName}.`],
-            contextualizacao: `${cfg.contextBase} O objetivo nesta etapa é analisar os requisitos técnicos, planejar a intervenção e executar os procedimentos de ${courseName} com máxima eficiência e qualidade.`,
+            conhecimentos: cfg.conhecimentos || [`Fundamentos e procedimentos técnicos de ${courseUnit}.`],
+            contextualizacao: `${cfg.contextBase} O objetivo nesta etapa é analisar os requisitos técnicos, planejar a intervenção e executar os procedimentos de ${courseUnit} com máxima eficiência e qualidade.`,
             observacoesDocente: "Conduzir a mediação pedagógica estimulando o protagonismo dos alunos na resolução prática das tarefas em laboratório ou oficina.",
             desafio: `${cfg.desafioBase}`,
             resultadosEsperados: `${cfg.entregaveis}`,
@@ -840,7 +852,7 @@ function buildGenericDynamicPlan(courseInfo) {
     }
 
     const cursoTipo = courseInfo.cursoTipo || 'tecnico';
-    const duracao = parseInt(courseInfo.duracaoAula) || (cursoTipo === 'fic' ? 60 : 45);
+    const duracao = parseInt(courseInfo.duracaoAula) || getDefaultDuration(cursoTipo);
     const totalAulas = Math.round((totalHours * 60) / duracao);
     let numAulasText = `${totalAulas} aulas de ${duracao} minutos cada`;
     if (courseInfo.modalidade === 'semipresencial' && (courseInfo.aulasPresenciais || courseInfo.aulasEad)) {
@@ -849,7 +861,7 @@ function buildGenericDynamicPlan(courseInfo) {
 
     return {
         curso: courseName,
-        unidade: courseInfo.courseUnit || courseName,
+        unidade: courseUnit,
         sigla: sigla,
         cursoTipo: cursoTipo,
         duracaoAula: duracao,
@@ -862,7 +874,7 @@ function buildGenericDynamicPlan(courseInfo) {
         escola: courseInfo.escola || "Escola SENAI \"Mariano Ferraz\"",
         objetivoUC: courseInfo.objetivoUC && courseInfo.objetivoUC.trim().length > 5 
             ? courseInfo.objetivoUC.trim() 
-            : `Desenvolver capacidades técnicas e socioemocionais relativas a ${courseName} de acordo com as diretrizes do MSEP.`,
+            : `Desenvolver capacidades técnicas e socioemocionais relativas a ${courseUnit} de acordo com as diretrizes do MSEP.`,
         situacoes: situacoes,
         _generatedByAI: false,
         _aiProvider: 'Motor Heurístico Multiárea SENAI'
@@ -882,9 +894,26 @@ function compileIRRACXlsx(courseData) {
     );
     zip.updateFile('[Content_Types].xml', Buffer.from(ctContent, 'utf8'));
 
+    // Intelligent Sigla & Sheet Name Sanitizer (Excel strict limits: max 31 chars, no \/?*[]:')
+    const rawSigla = (courseData.unitSigla || courseData.sigla || '').trim();
+    let safeUnitSigla = rawSigla;
+    if (!safeUnitSigla || safeUnitSigla.length > 31 || safeUnitSigla === courseData.courseName) {
+        const upper = (courseData.courseName || "CURSO").toUpperCase();
+        const words = upper.split(/[\s\-_]+/).filter(w => w.length > 2);
+        if (words.length >= 2) {
+            safeUnitSigla = (words[0].substring(0, 4) + "-" + words[1].substring(0, 4)).toUpperCase();
+        } else {
+            safeUnitSigla = upper.substring(0, 8).toUpperCase();
+        }
+    }
+    safeUnitSigla = safeUnitSigla.replace(/[\/\\?*\[\]:'"]/g, '').trim().substring(0, 31).trim();
+    if (!safeUnitSigla) safeUnitSigla = 'IRRAC';
+
     // 2. xl/workbook.xml
     let wbContent = zip.readAsText('xl/workbook.xml');
-    wbContent = wbContent.replace(/name="Antigravity"/g, `name="${courseData.unitSigla}"`);
+    wbContent = wbContent.replace(/name="Antigravity"/g, `name="${safeUnitSigla}"`);
+    // Remove invalid Google Sheets defined names (e.g. #NAME?)
+    wbContent = wbContent.replace(/<definedName name="_xleta\.SUMPRODUCT">.*?<\/definedName>/g, '');
     zip.updateFile('xl/workbook.xml', Buffer.from(wbContent, 'utf8'));
 
     // 3. String Table Management
@@ -911,7 +940,7 @@ function compileIRRACXlsx(courseData) {
     // 4. Update sheet2.xml (Cadastro)
     let s2Content = zip.readAsText('xl/worksheets/sheet2.xml');
     const strCourseNameIdx = getOrAddString(courseData.courseName);
-    const strUnitSiglaIdx = getOrAddString(courseData.unitSigla);
+    const strUnitSiglaIdx = getOrAddString(safeUnitSigla);
     const strTurmaIdx = getOrAddString(courseData.turma || "TURMA 2026");
     const strDocenteIdx = getOrAddString(courseData.docente || "Docente SENAI");
     const strSemAnoIdx = getOrAddString(courseData.semAno || "2º Sem/2026");
@@ -933,15 +962,16 @@ function compileIRRACXlsx(courseData) {
 
     // 5. Update sheet1.xml (Home)
     let s1Content = zip.readAsText('xl/worksheets/sheet1.xml');
-    s1Content = s1Content.replace(/<c r="D14"([^>]*)><f>Cadastro!E10<\/f><v>[^<]*<\/v><\/c>/, () => `<c r="D14" s="67" t="str"><f>Cadastro!E10</f><v>${courseData.unitSigla}</v></c>`);
+    s1Content = s1Content.replace(/<c r="D14"([^>]*)><f>Cadastro!E10<\/f><v>[^<]*<\/v><\/c>/, () => `<c r="D14" s="67" t="str"><f>Cadastro!E10</f><v>${safeUnitSigla}</v></c>`);
     zip.updateFile('xl/worksheets/sheet1.xml', Buffer.from(s1Content, 'utf8'));
 
+    // Collect and index all criteria
     const allCriteria = [];
     if (courseData.criteria && courseData.criteria.length > 0) {
         allCriteria.push(...courseData.criteria);
     } else if (courseData.situacoes) {
         courseData.situacoes.forEach(sa => {
-            if (sa.criterios) {
+            if (sa.criterios && Array.isArray(sa.criterios)) {
                 allCriteria.push(...sa.criterios);
             }
         });
@@ -955,14 +985,15 @@ function compileIRRACXlsx(courseData) {
     });
 
     const maxRowNumber = allCriteria.length > 0 ? Math.max(...allCriteria.map(c => c.row)) : 40;
+    const formulaSheetRef = `'${safeUnitSigla.replace(/'/g, "''")}'`;
     const evaluationRange = `$I$15:$I$${maxRowNumber}`;
     const matrixRange = `$J$15:$AD$${maxRowNumber}`;
     const offsetRange = `$J$15:$J$${maxRowNumber}`;
 
     // 6. Update sheet3.xml (Consolidação)
     let s3Content = zip.readAsText('xl/worksheets/sheet3.xml');
-    s3Content = s3Content.replace(/Antigravity!/g, `${courseData.unitSigla}!`);
-    s3Content = s3Content.replace(/<c r="M1"[^>]*><f>.*?<\/f><v>.*?<\/v><\/c>/, () => `<c r="M1" s="10" t="str"><f>IF(Cadastro!$E$10=&quot;&quot;,&quot;&quot;,Cadastro!$E$10)</f><v>${courseData.unitSigla}</v></c>`);
+    s3Content = s3Content.replace(/Antigravity!/g, `${formulaSheetRef}!`);
+    s3Content = s3Content.replace(/<c r="M1"[^>]*><f>.*?<\/f><v>.*?<\/v><\/c>/, () => `<c r="M1" s="10" t="str"><f>IF(Cadastro!$E$10=&quot;&quot;,&quot;&quot;,Cadastro!$E$10)</f><v>${safeUnitSigla}</v></c>`);
 
     // Dynamic formula adjustment in I2 to prevent #DIV/0! if countDesejaveis or countCriticos is 0
     let formulaI2 = `ROUND((G2*(50/E2))+(H2*(50/F2)),0)`;
@@ -990,9 +1021,9 @@ function compileIRRACXlsx(courseData) {
         );
 
         s3Content = s3Content.replace(new RegExp(`<c r="E${r}"[^>]*><v>[\\d.]+<\\/v><\\/c>`), () => `<c r="E${r}" s="1"><v>${countCriticos}</v></c>`);
-        s3Content = s3Content.replace(new RegExp(`<f>SUMPRODUCT\\(\\(INDEX\\(${courseData.unitSigla}!\\$J\\$15:\\$AD\\$\\d+,,\\$B${r}\\)<>&quot;&quot;\\)\\*\\(INDEX\\(${courseData.unitSigla}!\\$J\\$15:\\$AD\\$\\d+,,\\$B${r}\\)<>&quot;N\\/A&quot;\\)\\)<\\/f>`), () => `<f>SUMPRODUCT((INDEX(${courseData.unitSigla}!${matrixRange},,$B${r})<>&quot;&quot;)*(INDEX(${courseData.unitSigla}!${matrixRange},,$B${r})<>&quot;N/A&quot;))</f>`);
-        s3Content = s3Content.replace(new RegExp(`<f>COUNTIFS\\(${courseData.unitSigla}!\\$I\\$15:\\$I\\$\\d+,&quot;C&quot;,OFFSET\\(${courseData.unitSigla}!\\$J\\$15:\\$J\\$\\d+,0,ROW\\(A${r - 1}\\)-1\\),&quot;A&quot;\\)<\\/f>`), () => `<f>COUNTIFS(${courseData.unitSigla}!${evaluationRange},&quot;C&quot;,OFFSET(${courseData.unitSigla}!${offsetRange},0,ROW(A${r - 1})-1),&quot;A&quot;)</f>`);
-        s3Content = s3Content.replace(new RegExp(`<f>COUNTIFS\\(${courseData.unitSigla}!\\$I\\$15:\\$I\\$\\d+,&quot;D&quot;,OFFSET\\(${courseData.unitSigla}!\\$J\\$15:\\$J\\$\\d+, 0, ROW\\(A${r - 1}\\)-1\\),&quot;A&quot;\\)<\\/f>`), () => `<f>COUNTIFS(${courseData.unitSigla}!${evaluationRange},&quot;D&quot;,OFFSET(${courseData.unitSigla}!${offsetRange}, 0, ROW(A${r - 1})-1),&quot;A&quot;)</f>`);
+        s3Content = s3Content.replace(new RegExp(`<f>SUMPRODUCT\\(\\(INDEX\\(${formulaSheetRef}!\\$J\\$15:\\$AD\\$\\d+,,\\$B${r}\\)<>&quot;&quot;\\)\\*\\(INDEX\\(${formulaSheetRef}!\\$J\\$15:\\$AD\\$\\d+,,\\$B${r}\\)<>&quot;N\\/A&quot;\\)\\)<\\/f>`), () => `<f>SUMPRODUCT((INDEX(${formulaSheetRef}!${matrixRange},,$B${r})<>&quot;&quot;)*(INDEX(${formulaSheetRef}!${matrixRange},,$B${r})<>&quot;N/A&quot;))</f>`);
+        s3Content = s3Content.replace(new RegExp(`<f>COUNTIFS\\(${formulaSheetRef}!\\$I\\$15:\\$I\\$\\d+,&quot;C&quot;,OFFSET\\(${formulaSheetRef}!\\$J\\$15:\\$J\\$\\d+,0,ROW\\(A${r - 1}\\)-1\\),&quot;A&quot;\\)<\\/f>`), () => `<f>COUNTIFS(${formulaSheetRef}!${evaluationRange},&quot;C&quot;,OFFSET(${formulaSheetRef}!${offsetRange},0,ROW(A${r - 1})-1),&quot;A&quot;)</f>`);
+        s3Content = s3Content.replace(new RegExp(`<f>COUNTIFS\\(${formulaSheetRef}!\\$I\\$15:\\$I\\$\\d+,&quot;D&quot;,OFFSET\\(${formulaSheetRef}!\\$J\\$15:\\$J\\$\\d+, 0, ROW\\(A${r - 1}\\)-1\\),&quot;A&quot;\\)<\\/f>`), () => `<f>COUNTIFS(${formulaSheetRef}!${evaluationRange},&quot;D&quot;,OFFSET(${formulaSheetRef}!${offsetRange}, 0, ROW(A${r - 1})-1),&quot;A&quot;)</f>`);
     }
     zip.updateFile('xl/worksheets/sheet3.xml', Buffer.from(s3Content, 'utf8'));
 
@@ -1017,35 +1048,127 @@ function compileIRRACXlsx(courseData) {
         );
     }
 
-    for (const c of allCriteria) {
-        const rowNum = c.row;
-        let rowXml = `<row r="${rowNum}" ht="30" customHeight="1">`;
-        
-        if (c.cap) {
-            const capIdx = getOrAddString(c.cap);
-            rowXml += `<c r="A${rowNum}" s="94" t="s"><v>${capIdx}</v></c>`;
+    const criteriaByRow = new Map();
+    allCriteria.forEach(c => criteriaByRow.set(c.row, c));
+    const maxProcessRow = Math.max(maxRowNumber, 43);
+
+    // Helper for dummy columns AQ..AZ
+    const tailDummyCells = (r, s19 = '19', s20 = '20') => 
+        `<c r="AQ${r}" s="${s19}"/><c r="AR${r}" s="${s20}"/><c r="AS${r}" s="${s20}"/><c r="AT${r}" s="${s20}"/><c r="AU${r}" s="${s20}"/><c r="AV${r}" s="${s20}"/><c r="AW${r}" s="${s20}"/><c r="AX${r}" s="${s20}"/><c r="AY${r}" s="${s20}"/><c r="AZ${r}" s="${s20}"/>`;
+
+    // Process every row from 15 to maxProcessRow:
+    // - Criteria rows: filled with course data, ALL student evaluation cells empty (NO 'A's)
+    // - Spacer rows between SAs: official thin divider styling (NO criteria text, NO 'A's)
+    // - Empty rows after the course plan: clean blank grid rows (NO old template text, NO 'A's)
+    for (let r = 15; r <= maxProcessRow; r++) {
+        let rowXml = '';
+        if (criteriaByRow.has(r)) {
+            const c = criteriaByRow.get(r);
+            rowXml = `<row r="${r}" ht="30" customHeight="1">`;
+            if (c.cap && c.cap.trim()) {
+                const capIdx = getOrAddString(c.cap.trim());
+                rowXml += `<c r="A${r}" s="94" t="s"><v>${capIdx}</v></c><c r="B${r}" s="70"/><c r="C${r}" s="70"/><c r="D${r}" s="71"/>`;
+            } else {
+                rowXml += `<c r="A${r}" s="89"/><c r="B${r}" s="32"/><c r="C${r}" s="32"/><c r="D${r}" s="90"/>`;
+            }
+
+            const critStyle = (c.tipo === 'C') ? "95" : "98";
+            const critIdx = getOrAddString(c.crit);
+            rowXml += `<c r="E${r}" s="${critStyle}" t="s"><v>${critIdx}</v></c><c r="F${r}" s="45"/><c r="G${r}" s="45"/><c r="H${r}" s="45"/>`;
+
+            const tipoIdx = getOrAddString(c.tipo);
+            rowXml += `<c r="I${r}" s="96" t="s"><v>${tipoIdx}</v></c>`;
+
+            // All student cells completely clean, NO 'A', NO values!
+            for (let i = 0; i < studentCols.length; i++) {
+                rowXml += `<c r="${studentCols[i]}${r}" s="97"/>`;
+            }
+            rowXml += tailDummyCells(r);
+            rowXml += `</row>`;
+        } else if (r < maxRowNumber) {
+            // Divider row between Situations of Learning
+            rowXml = `<row r="${r}" ht="12" customHeight="1"><c r="A${r}" s="110"/>`;
+            const colsBtoI = ['B','C','D','E','F','G','H','I'];
+            for (const col of colsBtoI) {
+                rowXml += `<c r="${col}${r}" s="111"/>`;
+            }
+            for (const col of studentCols) {
+                rowXml += `<c r="${col}${r}" s="111"/>`;
+            }
+            rowXml += tailDummyCells(r, '111', '111');
+            rowXml += `</row>`;
+        } else {
+            // Empty row after course criteria up to legend
+            rowXml = `<row r="${r}" ht="15" customHeight="1">`;
+            rowXml += `<c r="A${r}" s="118"/><c r="B${r}" s="118"/><c r="C${r}" s="118"/><c r="D${r}" s="118"/>`;
+            rowXml += `<c r="E${r}" s="119"/><c r="F${r}" s="29"/><c r="G${r}" s="29"/><c r="H${r}" s="29"/><c r="I${r}" s="77"/>`;
+            for (const col of studentCols) {
+                rowXml += `<c r="${col}${r}" s="120"/>`;
+            }
+            rowXml += tailDummyCells(r, '112', '20');
+            rowXml += `</row>`;
         }
-        
-        const critStyle = (c.tipo === 'C') ? "95" : "98";
-        const critIdx = getOrAddString(c.crit);
-        rowXml += `<c r="E${rowNum}" s="${critStyle}" t="s"><v>${critIdx}</v></c>`;
-        
-        const tipoIdx = getOrAddString(c.tipo);
-        rowXml += `<c r="I${rowNum}" s="96" t="s"><v>${tipoIdx}</v></c>`;
-        
-        // Leave all student criteria cells completely empty for teacher evaluation
-        for (let i = 0; i < studentCols.length; i++) {
-            const col = studentCols[i];
-            rowXml += `<c r="${col}${rowNum}" s="97"/>`;
-        }
-        
-        rowXml += `</row>`;
-        
-        const rowPattern = new RegExp(`<row r="${rowNum}"[^>]*>.*?<\\/row>`, 's');
+
+        const rowPattern = new RegExp(`<row r="${r}"[^>]*>.*?<\\/row>`, 's');
         if (rowPattern.test(s4Content)) {
             s4Content = s4Content.replace(rowPattern, () => rowXml);
         }
     }
+
+    // Dynamic MergeCells for Sheet4
+    // Base table header merges, student column header merges, and legend merges
+    const baseHeaderMerges = [
+        "A2:AP2", "A3:AP3", "A4:AP4", "A5:AP5", "A6:F6", "G6:AE6", "AF6:AP6",
+        "A7:F7", "G7:AE7", "AF7:AP7", "A8:E8", "F8:P8", "Q8:AE8", "AF8:AP8",
+        "J13:J14", "K13:K14", "L13:L14", "M13:M14", "N13:N14", "O13:O14",
+        "P13:P14", "Q13:Q14", "AM13:AM14", "AN13:AN14", "AO13:AO14", "AP13:AP14",
+        "R13:R14", "S13:S14", "AH13:AH14", "AI13:AI14", "AJ13:AJ14", "AK13:AK14",
+        "AL13:AL14", "A9:E9", "F9:P9", "Q9:AE9", "AF9:AP9", "A10:AP10",
+        "A11:D14", "J11:AP11", "E11:H14", "I13:I14",
+        "T13:T14", "U13:U14", "V13:V14", "W13:W14", "X13:X14", "Y13:Y14",
+        "Z13:Z14", "AA13:AA14", "AB13:AB14", "AC13:AC14", "AD13:AD14", "AE13:AE14",
+        "AF13:AF14", "AG13:AG14",
+        "A44:C44", "A45:C45", "A46:C46", "A47:C47", "A48:C48"
+    ];
+
+    const courseMerges = [];
+    // Criteria merges E:H
+    for (const c of allCriteria) {
+        courseMerges.push(`E${c.row}:H${c.row}`);
+    }
+    // Capacidade merges A:D across consecutive criteria rows
+    let currentCapStart = null;
+    let currentCapEnd = null;
+    const sortedCriteria = [...allCriteria].sort((a, b) => a.row - b.row);
+    for (let i = 0; i < sortedCriteria.length; i++) {
+        const item = sortedCriteria[i];
+        if (item.cap && item.cap.trim()) {
+            if (currentCapStart !== null) {
+                courseMerges.push(`A${currentCapStart}:D${currentCapEnd}`);
+            }
+            currentCapStart = item.row;
+            currentCapEnd = item.row;
+        } else if (currentCapStart !== null && item.row === currentCapEnd + 1) {
+            currentCapEnd = item.row;
+        } else {
+            if (currentCapStart !== null) {
+                courseMerges.push(`A${currentCapStart}:D${currentCapEnd}`);
+                currentCapStart = null;
+            }
+        }
+    }
+    if (currentCapStart !== null) {
+        courseMerges.push(`A${currentCapStart}:D${currentCapEnd}`);
+    }
+
+    const allNewMerges = [...baseHeaderMerges, ...courseMerges];
+    let newMergeXml = `<mergeCells count="${allNewMerges.length}">\n`;
+    for (const m of allNewMerges) {
+        newMergeXml += `  <mergeCell ref="${m}"/>\n`;
+    }
+    newMergeXml += `</mergeCells>`;
+
+    s4Content = s4Content.replace(/<mergeCells[^>]*>.*?<\/mergeCells>/s, newMergeXml);
     zip.updateFile('xl/worksheets/sheet4.xml', Buffer.from(s4Content, 'utf8'));
 
     // 8. Rebuild xl/sharedStrings.xml
@@ -1067,7 +1190,10 @@ function compileIRRACXlsx(courseData) {
     newSstXml += `</sst>`;
     zip.updateFile('xl/sharedStrings.xml', Buffer.from(newSstXml, 'utf8'));
 
-    return zip.toBuffer();
+    return {
+        buffer: zip.toBuffer(),
+        safeUnitSigla: safeUnitSigla
+    };
 }
 
 // Serverless Handler for Vercel / Cloud
@@ -1170,9 +1296,9 @@ module.exports = (req, res) => {
         req.on('end', () => {
             try {
                 const courseData = JSON.parse(body);
-                const xlsxBuffer = compileIRRACXlsx(courseData);
-                
-                const safeName = (courseData.unitSigla || 'IRRAC').replace(/[^a-zA-Z0-9-_]/g, '_');
+                const compileResult = compileIRRACXlsx(courseData);
+                const xlsxBuffer = compileResult.buffer || compileResult;
+                const safeName = (compileResult.safeUnitSigla || courseData.unitSigla || 'IRRAC').replace(/[^a-zA-Z0-9-_]/g, '_');
                 res.writeHead(200, {
                     'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                     'Content-Disposition': `attachment; filename="IRRAC - ${safeName}.xlsx"`,
@@ -1181,6 +1307,41 @@ module.exports = (req, res) => {
                 res.end(xlsxBuffer);
             } catch (err) {
                 console.error('Error exporting IRRAC:', err);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: err.message }));
+            }
+        });
+        return;
+    }
+
+    if (isRoute('parse-course-plan')) {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            try {
+                const data = JSON.parse(body);
+                const fileName = data.fileName || 'plano_de_curso.pdf';
+                const apiKey = data.apiKey || process.env.GEMINI_API_KEY;
+
+                let text = '';
+                if (data.fileData) {
+                    const buf = Buffer.from(data.fileData, 'base64');
+                    text = extractPdfText(buf);
+                } else if (data.text) {
+                    text = data.text;
+                }
+
+                let parsedResult;
+                if (text && text.trim().length > 20) {
+                    parsedResult = await parseCoursePlanWithGemini(text, fileName, apiKey);
+                } else {
+                    parsedResult = parseCoursePlanHeuristic(text, fileName);
+                }
+
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, ...parsedResult }));
+            } catch (err) {
+                console.error('Error parsing course plan:', err);
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: false, error: err.message }));
             }

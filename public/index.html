@@ -142,15 +142,15 @@
 
                 <div class="form-grid">
                     <div class="form-group full-width">
-                        <label for="inp-course-name">Nome do Curso / Unidade Curricular</label>
-                        <input type="text" id="inp-course-name" class="form-control" placeholder="Ex: Técnico em Desenvolvimento de Sistemas - Programação Web">
+                        <label for="inp-course-name">Nome do Curso Matriz / Habilitação Profissional</label>
+                        <input type="text" id="inp-course-name" class="form-control" placeholder="Ex: Técnico em Desenvolvimento de Sistemas">
                     </div>
 
-                    <!-- Nível / Tipo de Curso (Diretrizes MSEP: 45 min Cursos Regulares vs 60 min FIC) -->
+                    <!-- Nível / Tipo de Curso (Diretrizes MSEP: 45 min Técnico vs 60 min CAI/FIC/Superior) -->
                     <div class="form-group full-width">
                         <label class="form-label-with-hint">
                             <span>Nível / Tipo de Curso <span class="required-asterisk">*</span></span>
-                            <span class="label-hint">Define a conversão de horas em aulas (45 min ou 60 min)</span>
+                            <span class="label-hint">Identificado automaticamente ou selecionável</span>
                         </label>
                         <div class="course-type-grid" role="radiogroup" aria-label="Tipo de Curso">
                             <label class="course-type-card active" id="card-type-tecnico">
@@ -160,17 +160,17 @@
                                     <span class="type-card-duration">45 min / aula</span>
                                 </div>
                                 <div class="type-card-title">Técnico</div>
-                                <div class="type-card-desc">Cursos Técnicos de Nível Médio (matriz regular em horas-aula de 45 minutos)</div>
+                                <div class="type-card-desc">Cursos Técnicos de Nível Médio (horas-aula regulares de 45 minutos)</div>
                             </label>
 
                             <label class="course-type-card" id="card-type-cai">
                                 <input type="radio" name="radio-course-type" value="cai">
                                 <div class="type-card-header">
-                                    <span class="type-card-badge">Cursos Regulares</span>
-                                    <span class="type-card-duration">45 min / aula</span>
+                                    <span class="type-card-badge cai-badge">Aprendizagem</span>
+                                    <span class="type-card-duration">60 min / aula</span>
                                 </div>
                                 <div class="type-card-title">CAI (Aprendizagem)</div>
-                                <div class="type-card-desc">Cursos de Aprendizagem Industrial (horas-aula regulares de 45 minutos)</div>
+                                <div class="type-card-desc">Cursos de Aprendizagem Industrial (horas-aula oficiais de 60 minutos)</div>
                             </label>
 
                             <label class="course-type-card" id="card-type-fic">
@@ -180,19 +180,64 @@
                                     <span class="type-card-duration">60 min / aula</span>
                                 </div>
                                 <div class="type-card-title">FIC</div>
-                                <div class="type-card-desc">Qualificação e Aperfeiçoamento Profissional (aulas padrão de 60 minutos)</div>
+                                <div class="type-card-desc">Qualificação e Aperfeiçoamento (horas-aula de 60 minutos com IRRAC)</div>
+                            </label>
+
+                            <label class="course-type-card" id="card-type-superior">
+                                <input type="radio" name="radio-course-type" value="superior">
+                                <div class="type-card-header">
+                                    <span class="type-card-badge superior-badge">Ensino Superior</span>
+                                    <span class="type-card-duration">60 min / aula</span>
+                                </div>
+                                <div class="type-card-title">Superior</div>
+                                <div class="type-card-desc">Graduação, Tecnologia e Pós-Graduação (horas-aula de 60 minutos)</div>
                             </label>
                         </div>
                     </div>
 
-                    <div class="form-group">
-                        <label for="inp-unit-sigla">Sigla da Unidade (Nome da Aba no IRRAC)</label>
+                    <!-- Detecção e Seleção de Unidades Curriculares (UCs) da Matriz -->
+                    <div class="form-group full-width" id="uc-selection-wrapper" style="display: none;">
+                        <div class="uc-selector-card">
+                            <div class="uc-selector-header">
+                                <div class="uc-header-title">
+                                    <span class="uc-header-icon">📚</span>
+                                    <div>
+                                        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                                            <strong>Unidades Curriculares (UCs) Detectadas na Matriz</strong>
+                                            <span class="uc-structure-badge" id="uc-structure-badge" style="display: none;"></span>
+                                        </div>
+                                        <p class="uc-header-hint">Clique na UC desejada para preencher automaticamente o nome, carga horária e modalidade:</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="uc-chips-container" id="uc-chips-container">
+                                <!-- Chips gerados dinamicamente via JS -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group full-width">
+                        <label for="inp-course-unit" class="form-label-with-hint">
+                            <span>Unidade Curricular (UC a ser planejada) <span class="required-asterisk">*</span></span>
+                            <span class="label-hint">Diferente do Curso Matriz; selecione acima ou preencha</span>
+                        </label>
+                        <input type="text" id="inp-course-unit" class="form-control" placeholder="Ex: Levantamento de Requisitos">
+                    </div>
+
+                    <div class="form-group" id="group-unit-sigla">
+                        <label for="inp-unit-sigla" style="display: flex; align-items: center; justify-content: space-between;">
+                            <span>Sigla da Unidade (Aba do IRRAC)</span>
+                            <span class="badge-fic-only" id="badge-sigla-fic-only">Exclusivo FIC</span>
+                        </label>
                         <input type="text" id="inp-unit-sigla" class="form-control" placeholder="Ex: DEV-SIST ou BANC-DADOS">
+                        <small class="form-help-text" id="help-unit-sigla" style="display: none; color: var(--text-muted); font-size: 0.74rem; margin-top: 4px;">
+                            Cursos regulares (Técnico e CAI) utilizam o diário de classe corporativo SGE.
+                        </small>
                     </div>
 
                     <div class="form-group">
-                        <label for="inp-workload">Carga Horária Total (Horas)</label>
-                        <input type="number" id="inp-workload" class="form-control" placeholder="Ex: 80, 120, 160" min="1" max="1200">
+                        <label for="inp-workload">Carga Horária da UC (Horas) <span class="required-asterisk">*</span></label>
+                        <input type="number" id="inp-workload" class="form-control" placeholder="Ex: 60, 75, 80, 120" min="1" max="1200">
                     </div>
 
                     <!-- Banner de Conversão Dinâmica de Carga Horária em Aulas -->
@@ -359,14 +404,18 @@
         <section class="step-view" id="step-4">
             <div class="export-grid no-print">
                 <!-- Export Card 1: IRRAC XLSX -->
-                <div class="card export-card">
+                <div class="card export-card" id="card-export-irrac">
                     <div class="export-icon xlsx-icon">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
                     </div>
                     <h3>1. Planilha IRRAC Oficial (.XLSX)</h3>
-                    <p>Compilação OpenXML com recálculo dinâmico de pesos (Total Críticos e Desejáveis) e todas as fórmulas integradas.</p>
+                    <p id="irrac-card-desc">Compilação OpenXML com recálculo dinâmico de pesos (Total Críticos e Desejáveis) e todas as fórmulas integradas.</p>
                     
-                    <div class="irrac-stats-preview">
+                    <div class="irrac-notice-banner" id="irrac-notice-banner" style="display: none;">
+                        ⚠️ <strong>IRRAC Exclusivo para FIC:</strong> Cursos regulares (Técnico, CAI e Superior) utilizam o diário de classe do SGE corporativo. A exportação em planilha IRRAC é aplicável a cursos FIC.
+                    </div>
+
+                    <div class="irrac-stats-preview" id="irrac-stats-preview">
                         <div class="stat-pill"><span id="stat-crit-count">0</span> Críticos (C)</div>
                         <div class="stat-pill"><span id="stat-desej-count">0</span> Desejáveis (D)</div>
                         <div class="stat-pill"><span id="stat-total-count">0</span> Total</div>

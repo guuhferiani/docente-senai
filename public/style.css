@@ -567,15 +567,21 @@ img, svg {
     font-weight: 700;
 }
 
-/* Course Type 3-Card Grid */
+/* Course Type Grid (4 Cards: Técnico, CAI, FIC, Superior) */
 .course-type-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1rem;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.85rem;
     margin-top: 0.25rem;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
+    .course-type-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 600px) {
     .course-type-grid {
         grid-template-columns: 1fr;
     }
@@ -588,7 +594,7 @@ img, svg {
     background: #ffffff;
     border: 2px solid var(--border-color);
     border-radius: var(--radius-lg);
-    padding: 1.1rem 1.15rem;
+    padding: 1rem 1.05rem;
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: var(--shadow-sm);
@@ -631,10 +637,175 @@ img, svg {
     border-radius: 9999px;
 }
 
+.type-card-badge.cai-badge {
+    color: #ea580c;
+    background: #ffedd5;
+    border-color: #fed7aa;
+}
+
 .type-card-badge.fic-badge {
     color: #7c3aed;
     background: #f3e8ff;
     border-color: #ddd6fe;
+}
+
+.type-card-badge.superior-badge {
+    color: #0d9488;
+    background: #ccfbf1;
+    border-color: #99f6e4;
+}
+
+/* UC Selector Card & Chips */
+.uc-selector-card {
+    background: #f0f9ff;
+    border: 1.5px solid #bae6fd;
+    border-radius: var(--radius-lg);
+    padding: 1.15rem 1.25rem;
+    margin-top: 0.25rem;
+    margin-bottom: 0.5rem;
+    box-shadow: var(--shadow-sm);
+}
+
+.uc-selector-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 0.85rem;
+}
+
+.uc-header-title {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+}
+
+.uc-header-icon {
+    font-size: 1.5rem;
+    line-height: 1;
+}
+
+.uc-header-title strong {
+    font-size: 0.95rem;
+    color: #0369a1;
+    display: inline-block;
+}
+
+.uc-header-hint {
+    font-size: 0.82rem;
+    color: #0284c7;
+    margin-top: 0.25rem;
+    margin-bottom: 0;
+}
+
+.uc-structure-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #065f46;
+    background: #d1fae5;
+    border: 1px solid #a7f3d0;
+    padding: 0.2rem 0.6rem;
+    border-radius: 9999px;
+    margin-left: 0.6rem;
+}
+
+.uc-chips-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 0.25rem;
+}
+
+.uc-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: #ffffff;
+    border: 1.5px solid #cbd5e1;
+    padding: 0.45rem 0.85rem;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-main);
+    transition: all 0.15s ease-in-out;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.uc-chip:hover {
+    border-color: #0284c7;
+    background: #e0f2fe;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
+.uc-chip.active {
+    background: #0284c7;
+    border-color: #0284c7;
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35);
+}
+
+.uc-chip-hours {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.15rem 0.45rem;
+    border-radius: var(--radius-sm);
+    background: #f1f5f9;
+    color: var(--text-muted);
+}
+
+.uc-chip.active .uc-chip-hours {
+    background: rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+}
+
+.uc-chip-badge-ead {
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 0.12rem 0.4rem;
+    border-radius: 9999px;
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fde68a;
+}
+
+.badge-fic-only {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #7c3aed;
+    background: #f3e8ff;
+    border: 1px solid #ddd6fe;
+    padding: 0.15rem 0.45rem;
+    border-radius: 9999px;
+    margin-left: 0.5rem;
+    text-transform: uppercase;
+}
+
+/* IRRAC Notice Banner in Step 4 */
+.irrac-notice-banner {
+    background: #fffbeb;
+    border: 1.5px solid #fde68a;
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+    font-size: 0.85rem;
+    color: #92400e;
+    line-height: 1.45;
+    margin-bottom: 1rem;
+}
+
+.export-card.disabled {
+    opacity: 0.7;
+    background: #f8fafc;
+}
+
+.export-card.disabled button {
+    cursor: not-allowed;
+    opacity: 0.6;
 }
 
 .type-card-duration {
