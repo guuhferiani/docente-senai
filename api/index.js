@@ -4,6 +4,7 @@ const https = require('https');
 const AdmZip = require('adm-zip');
 const templateBase64 = require('../template_base64');
 const { extractPdfText, parseCoursePlanHeuristic, parseCoursePlanWithGemini } = require('./pdfExtractor');
+const { compilePlanoDocx } = require('./docxCompiler');
 
 function getDefaultDuration(tipo) {
     return (tipo === 'tecnico') ? 45 : 60;
@@ -152,26 +153,70 @@ const SAMPLE_COURSES = {
             "3. Instruções Avançadas: Temporizadores (TON/TOF), Contadores (CTU/CTD) e Comparadores.",
             "4. Redes e Diagnóstico: Protocolos industriais (Modbus/Profinet) e rotinas de simulação."
         ]
+    },
+    "performance": {
+        area: "Gestão e Negócios / Administração",
+        courseName: "Técnico em Administração",
+        courseUnit: "Performance Pessoal e Profissional",
+        unitSigla: "PERF-PESSOAL",
+        workload: 60,
+        turma: "ADM-2026/2",
+        semAno: "2º Sem/2026",
+        docente: "Docente de Administração",
+        escola: "Escola SENAI \"Mariano Ferraz\"",
+        cursoTipo: "tecnico",
+        duracaoAula: 45,
+        numAulas: "80 aulas de 45 minutos",
+        objetivoUC: "Desenvolver capacidades básicas e socioemocionais relativas à formação pessoal e profissional direcionadas ao planejamento de carreira.",
+        capacidadesTecnicas: [
+            "Identificar os direitos e deveres pessoais, sociais e profissionais, tendo em vista a legislação trabalhista e previdenciária vigente.",
+            "Reconhecer a evolução e as mudanças ocorridas no mundo do trabalho.",
+            "Reconhecer necessidade do autodesenvolvimento, tendo em vista as novas exigências no mundo do trabalho.",
+            "Planejar a carreira profissional, tendo em vista a sua empregabilidade.",
+            "Reconhecer as características das diferentes gerações, considerando os conflitos nas relações profissionais.",
+            "Utilizar ferramentas do processo criativo no planejamento da carreira profissional.",
+            "Identificar a diferença entre os tipos de inteligência para utilização como estratégia de desenvolvimento pessoal.",
+            "Planejar finanças, tendo em vista a organização de receitas e despesas pessoais."
+        ],
+        capacidadesSocioemocionais: [
+            "Autogestão: Planejamento de ações.",
+            "Autogestão: Autodesenvolvimento.",
+            "Demonstrar autonomia.",
+            "Pensamento analítico: Demonstrar atenção a detalhes.",
+            "Pensamento analítico: Demonstrar visão sistêmica."
+        ],
+        conhecimentos: [
+            "1. Direitos e deveres da juventude e legislação trabalhista e previdenciária.",
+            "2. O mundo do trabalho: evolução e futuro.",
+            "3. Desenvolvimento pessoal e profissional, inteligências múltiplas e criatividade.",
+            "4. Finanças pessoais, orçamento e planejamento financeiro."
+        ]
     }
 };
 
 async function generateMSEPPlan(courseInfo) {
-    // Attempt Google Gemini AI Generation first if Key is Available
+    const key = courseInfo.courseKey || '';
+    const nameLower = (courseInfo.courseName || '').toLowerCase();
+    const unitLower = (courseInfo.courseUnit || '').toLowerCase();
+    const hasOfficialCaps = Array.isArray(courseInfo.capacidadesTecnicas) && courseInfo.capacidadesTecnicas.length > 0;
+
+    // Presets oficiais fixos têm prioridade apenas se o usuário selecionou explicitamente um preset ou se não houver ementa oficial carregada de um PDF
+    if (SAMPLE_COURSES[key]) {
+        return buildPresetPlan(SAMPLE_COURSES[key], courseInfo);
+    }
+    if (!hasOfficialCaps) {
+        if (nameLower.includes('chatgpt') || unitLower.includes('chatgpt')) return buildPresetPlan(SAMPLE_COURSES.chatgpt, courseInfo);
+        if (nameLower.includes('antigravity') || unitLower.includes('antigravity')) return buildPresetPlan(SAMPLE_COURSES.antigravity, courseInfo);
+        if (nameLower.includes('elétr') || nameLower.includes('comando') || nameLower.includes('motor') || unitLower.includes('elétr') || unitLower.includes('comando')) return buildPresetPlan(SAMPLE_COURSES.eletrica, courseInfo);
+        if (nameLower.includes('clp') || nameLower.includes('automa') || unitLower.includes('clp') || unitLower.includes('automa')) return buildPresetPlan(SAMPLE_COURSES.automacao, courseInfo);
+        if (nameLower.includes('performance') || unitLower.includes('performance') || nameLower.includes('pessoal') || unitLower.includes('pessoal')) return buildPresetPlan(SAMPLE_COURSES.performance, courseInfo);
+    }
+
+    // Geração pedagógica com IA (Google Gemini) para cursos customizados / planos de curso carregados
     const aiPlan = await generateWithGemini(courseInfo);
     if (aiPlan && aiPlan.situacoes && aiPlan.situacoes.length > 0) {
         return aiPlan;
     }
-
-    const key = courseInfo.courseKey || '';
-    const nameLower = (courseInfo.courseName || '').toLowerCase();
-
-    if (SAMPLE_COURSES[key]) {
-        return buildPresetPlan(SAMPLE_COURSES[key], courseInfo);
-    }
-    if (nameLower.includes('chatgpt')) return buildPresetPlan(SAMPLE_COURSES.chatgpt, courseInfo);
-    if (nameLower.includes('antigravity')) return buildPresetPlan(SAMPLE_COURSES.antigravity, courseInfo);
-    if (nameLower.includes('elétr') || nameLower.includes('comando') || nameLower.includes('motor')) return buildPresetPlan(SAMPLE_COURSES.eletrica, courseInfo);
-    if (nameLower.includes('clp') || nameLower.includes('automa')) return buildPresetPlan(SAMPLE_COURSES.automacao, courseInfo);
 
     return buildGenericDynamicPlan(courseInfo);
 }
@@ -338,6 +383,132 @@ function buildPresetPlan(preset, overrides) {
         return base;
     }
 
+    const isPerformance = preset === SAMPLE_COURSES.performance ||
+        (preset.courseUnit && preset.courseUnit.toLowerCase().includes('performance')) ||
+        (overrides.courseUnit && overrides.courseUnit.toLowerCase().includes('performance'));
+
+    if (isPerformance) {
+        base.objetivoUC = "Desenvolver capacidades básicas e socioemocionais relativas à formação pessoal e profissional direcionadas ao planejamento de carreira.";
+        base.situacoes = [
+            {
+                numero: "01",
+                titulo: "Cidadania e Trabalho",
+                aulas: 20,
+                cargaHoraria: 15,
+                estrategiaTipo: "Estudo de caso",
+                contextualizacaoTitulo: "O Dilema do Primeiro Contrato: Direitos e Desafios no Novo Mundo do Trabalho.",
+                contextualizacao: "Uma empresa iniciante de tecnologia, a 'TechAdmin Soluções', está contratando seu primeiro time de assistentes administrativos. A empresa opera em modelo híbrido e utiliza contratos intermitentes e de aprendizagem. No entanto, surgem dúvidas entre os novos colaboradores sobre o cumprimento da jornada de trabalho e a aplicação do Estatuto da Juventude em um ambiente digital.",
+                observacoesDocente: "O foco deve ser a interpretação da legislação trabalhista e previdenciária vigente e a compreensão da evolução do trabalho. Utilize como apoio a Declaração Universal dos Direitos Humanos.",
+                desafio: "Realizar um Estudo de Caso baseado no cenário da TechAdmin. Os alunos devem analisar a narrativa, identificar se os direitos dos colaboradores estão sendo respeitados e propor ajustes no modelo de contrato para garantir segurança jurídica.",
+                resultadosEsperados: "Relatório de análise comparativa entre a prática da empresa e a legislação vigente, contendo argumentos técnicos sobre as novas relações de trabalho.",
+                capacidadesTecnicas: [
+                    "Identificar os direitos e deveres pessoais, sociais e profissionais, tendo em vista a legislação trabalhista e previdenciária vigente.",
+                    "Reconhecer a evolução e as mudanças ocorridas no mundo do trabalho."
+                ],
+                capacidadesSocioemocionais: [
+                    "Pensamento analítico: Demonstrar atenção a detalhes.",
+                    "Pensamento analítico: Demonstrar visão sistêmica."
+                ],
+                conhecimentos: [
+                    "Direitos e deveres da juventude; Legislação trabalhista e previdenciária.",
+                    "O mundo do trabalho: evolução e futuro."
+                ],
+                estrategiasEnsino: "Exposição dialogada; Trabalho em grupo para Estudo de Caso.",
+                instrumentosAvaliacao: "Relatório técnico; Prova de respostas construídas.",
+                recursos: "Ambiente: Sala de aula. Recursos: Computadores com internet; Projetor multimídia; Vade Mecum ou textos legais.",
+                criterios: [
+                    { cap: "Identificar direitos e deveres pessoais e profissionais.", crit: "Indica corretamente os tipos de contrato aplicáveis ao cenário.", tipo: "C" },
+                    { cap: "Identificar direitos e deveres pessoais e profissionais.", crit: "Descreve as obrigações previdenciárias conforme a lei.", tipo: "D" },
+                    { cap: "Reconhecer a evolução do trabalho.", crit: "Relaciona mudanças tecnológicas com novas relações de trabalho.", tipo: "C" },
+                    { cap: "Reconhecer a evolução do trabalho.", crit: "Explica a diferença entre emprego e trabalho.", tipo: "D" },
+                    { cap: "Pensamento analítico: atenção a detalhes.", crit: "Demonstra precisão na análise dos itens técnicos da legislação.", tipo: "C" },
+                    { cap: "Pensamento analítico: atenção a detalhes.", crit: "Identifica inconsistências em contratos simulados .", tipo: "C" },
+                    { cap: "Pensamento analítico: visão sistêmica.", crit: "Avalia o impacto das normas legais na sustentabilidade da empresa.", tipo: "C" },
+                    { cap: "Pensamento analítico: visão sistêmica.", crit: "Relaciona direitos individuais com bem-estar coletivo.", tipo: "D" }
+                ]
+            },
+            {
+                numero: "02",
+                titulo: "Projeto de Carreira e Mercado de Trabalho",
+                aulas: 40,
+                cargaHoraria: 30,
+                estrategiaTipo: "Projeto",
+                contextualizacaoTitulo: "Agência de Talentos: Projetando o Profissional Nexialista.",
+                contextualizacao: "O mercado atual exige profissionais flexíveis, capazes de aprender continuamente e aplicar soluções criativas. Para se posicionar estrategicamente, cada aluno assumirá o papel de consultor de sua própria carreira, desenvolvendo um portfólio digital e um plano de desenvolvimento individual (PDI).",
+                observacoesDocente: "Incentivar a autoavaliação crítica por meio da Teoria das Múltiplas Inteligências e matriz SWOT pessoal. Estimular a utilização de ferramentas digitais como LinkedIn e Canva para apresentação.",
+                desafio: "Elaborar um Projeto de Carreira estruturado, contendo mapeamento de competências (Hard e Soft Skills), identificação de áreas de oportunidade no setor administrativo e protótipo de apresentação profissional (pitch em vídeo ou portfólio digital).",
+                resultadosEsperados: "Dossiê digital de carreira com metas SMART e plano de ação estruturado para os próximos 3 anos.",
+                capacidadesTecnicas: [
+                    "Reconhecer necessidade do autodesenvolvimento, tendo em vista as novas exigências no mundo do trabalho.",
+                    "Planejar a carreira profissional, tendo em vista a sua empregabilidade.",
+                    "Utilizar ferramentas do processo criativo no planejamento da carreira profissional.",
+                    "Identificar a diferença entre os tipos de inteligência para utilização como estratégia de desenvolvimento pessoal."
+                ],
+                capacidadesSocioemocionais: [
+                    "Autogestão: Planejamento de ações.",
+                    "Autogestão: Autodesenvolvimento.",
+                    "Demonstrar autonomia."
+                ],
+                conhecimentos: [
+                    "Soft e Hard skills; Desenvolvimento Pessoal; Autoconhecimento e Inteligências Múltiplas.",
+                    "Ferramentas de Criatividade e Planejamento de Carreira."
+                ],
+                estrategiasEnsino: "Oficina (Workshop) de currículo e PDI; Roda de feedback e Pitch individual.",
+                instrumentosAvaliacao: "Portfólio / Projeto de Carreira; Rubrica de autoavaliação e heteroavaliação.",
+                recursos: "Ambiente: Laboratório de informática. Recursos: Plataformas de design (Canva/slides), acesso a redes profissionais.",
+                criterios: [
+                    { cap: "Planejar a carreira profissional.", crit: "Define metas de curto, médio e longo prazo alinhadas ao perfil.", tipo: "C" },
+                    { cap: "Planejar a carreira profissional.", crit: "Elabora vídeo-currículo seguindo padrões de mercado.", tipo: "D" },
+                    { cap: "Utilizar ferramentas criativas.", crit: "Aplica técnicas de geração de ideias no projeto de carreira.", tipo: "C" },
+                    { cap: "Utilizar ferramentas criativas.", crit: "Demonstra originalidade na apresentação do projeto.", tipo: "D" },
+                    { cap: "Autodesenvolvimento.", crit: "Mapeia lacunas de competências em relação ao mercado atual.", tipo: "C" },
+                    { cap: "Autodesenvolvimento.", crit: "Propõe ações concretas para aprimoramento constante.", tipo: "D" },
+                    { cap: "Múltiplas inteligências.", crit: "Associa inteligências predominantes a trajetórias profissionais.", tipo: "C" },
+                    { cap: "Múltiplas inteligências.", crit: "Utiliza o autoconhecimento como base para o plano.", tipo: "D" },
+                    { cap: "Autogestão.", crit: "Cumpre rigorosamente as etapas e prazos definidos.", tipo: "C" },
+                    { cap: "Autogestão.", crit: "Organiza o plano de ação com entregas parciais.", tipo: "D" },
+                    { cap: "Demonstrar autonomia.", crit: "Toma decisões fundamentadas sem dependência constante do docente.", tipo: "C" },
+                    { cap: "Demonstrar autonomia.", crit: "Busca fontes de informação complementares.", tipo: "D" }
+                ]
+            },
+            {
+                numero: "03",
+                titulo: "Conflito de Gerações e Finanças Pessoais",
+                aulas: 20,
+                cargaHoraria: 15,
+                estrategiaTipo: "Situação-problema",
+                contextualizacaoTitulo: "Conflito de Gerações e a Engenharia Financeira Familiar.",
+                contextualizacao: "Uma cooperativa de crédito regional identificou atritos operacionais entre colaboradores veteranos (Geração X) e recém-admitidos (Geração Z), impactando o atendimento ao cliente e a gestão financeira de pequenos empreendedores locais.",
+                observacoesDocente: "Abordar aspectos socioemocionais das diferenças intergeracionais e a importância da educação financeira pessoal como base para a tomada de decisão corporativa.",
+                desafio: "Propor um plano de mediação de conflitos para o ambiente de trabalho e estruturar uma planilha de planejamento financeiro pessoal, simulando orçamento equilibrado com reserva de emergência.",
+                resultadosEsperados: "Guia de boas práticas de convivência intergeracional e planilha de finanças pessoais parametrizada.",
+                capacidadesTecnicas: [
+                    "Reconhecer as características das diferentes gerações, considerando os conflitos nas relações profissionais.",
+                    "Planejar finanças, tendo em vista a organização de receitas e despesas pessoais."
+                ],
+                capacidadesSocioemocionais: [
+                    "Pensamento analítico: Demonstrar visão sistêmica."
+                ],
+                conhecimentos: [
+                    "Relações intergeracionais no trabalho; Conflito e cooperação.",
+                    "Planejamento financeiro pessoal: orçamento, receitas, despesas e investimentos básicos."
+                ],
+                estrategiasEnsino: "Painel temático sobre gerações; Simulação prática de orçamento financeiro.",
+                instrumentosAvaliacao: "Planilha de orçamento comentada; Apresentação oral de soluções de mediação.",
+                recursos: "Ambiente: Sala de aula com computadores. Recursos: Softwares de planilha eletrônica (Excel/Google Sheets).",
+                criterios: [
+                    { cap: "Reconhecer características das gerações.", crit: "Propõe estratégias de mediação para mitigar conflitos no trabalho.", tipo: "C" },
+                    { cap: "Reconhecer características das gerações.", crit: "Identifica valores e comportamentos típicos de cada geração.", tipo: "D" },
+                    { cap: "Planejar finanças pessoais.", crit: "Estrutura planilha de orçamento com equilíbrio entre receitas e despesas.", tipo: "C" },
+                    { cap: "Planejar finanças pessoais.", crit: "Diferencia conceitos de salário bruto e líquido.", tipo: "D" },
+                    { cap: "Pensamento analítico: visão sistêmica.", crit: "Analisa como o comportamento financeiro impacta a vida pessoal.", tipo: "C" },
+                    { cap: "Pensamento analítico: visão sistêmica.", crit: "Relaciona variáveis econômicas com capacidade de investimento.", tipo: "D" }
+                ]
+            }
+        ];
+        return base;
+    }
+
     return buildGenericDynamicPlan(overrides || preset);
 }
 
@@ -363,6 +534,20 @@ async function generateWithGemini(courseInfo) {
     const modalidadeLabel = (courseInfo.modalidade === 'semipresencial')
         ? `Semipresencial (${courseInfo.aulasPresenciais || 0} aulas presenciais e ${courseInfo.aulasEad || 0} aulas EaD / não presenciais)`
         : '100% Presencial';
+    let officialCapabilitiesPrompt = '';
+    const hasOfficialCaps = Array.isArray(courseInfo.capacidadesTecnicas) && courseInfo.capacidadesTecnicas.length > 0;
+    if (hasOfficialCaps) {
+        officialCapabilitiesPrompt += `\n\nATENÇÃO - CAPACIDADES TÉCNICAS OFICIAIS DO PLANO DE CURSO SENAI (OBRIGATÓRIO DISTRIBUIR E USAR ESTAS):
+${courseInfo.capacidadesTecnicas.map((c, i) => `${i + 1}. ${c}`).join('\n')}`;
+    }
+    if (Array.isArray(courseInfo.capacidadesSocioemocionais) && courseInfo.capacidadesSocioemocionais.length > 0) {
+        officialCapabilitiesPrompt += `\n\nCAPACIDADES SOCIOEMOCIONAIS OFICIAIS DO PLANO DE CURSO SENAI:
+${courseInfo.capacidadesSocioemocionais.map((c, i) => `${i + 1}. ${c}`).join('\n')}`;
+    }
+    if (Array.isArray(courseInfo.conhecimentos) && courseInfo.conhecimentos.length > 0) {
+        officialCapabilitiesPrompt += `\n\nCONHECIMENTOS OFICIAIS DO PLANO DE CURSO SENAI:
+${courseInfo.conhecimentos.slice(0, 25).map(c => `- ${c}`).join('\n')}`;
+    }
 
     const prompt = `Você é um Engenheiro Pedagógico Especialista do SENAI-SP com domínio completo da Metodologia SENAI de Educação Profissional (MSEP), do Book MSEP e do Instrumento de Registro de Resultados da Avaliação com Critérios (IRRAC).
 
@@ -378,9 +563,10 @@ Gere um Plano de Ensino MSEP Modular para o seguinte curso:
 - Turma: "${courseInfo.turma || 'TURMA 2026'}"
 - Semestre/Ano: "${courseInfo.semAno || '2º Sem/2026'}"
 ${courseInfo.objetivoUC ? `- Objetivo da Unidade Curricular (utilize este exatamente): "${courseInfo.objetivoUC}"` : ''}
+${officialCapabilitiesPrompt}
 
 Diretrizes Rigorosas do SENAI MSEP (Diretrizes Oficiais dos Prompts MSEP):
-1. REGRA FUNDAMENTAL: NUNCA FAÇA ABREVIAÇÕES DE CONTEÚDOS, CAPACIDADES OU CONHECIMENTOS. Reescreva a descrição técnica completa de cada capacidade e conhecimento, NUNCA utilize códigos ou siglas como 'K1', 'CT02' ou 'CS3'.
+1. REGRA FUNDAMENTAL: ${hasOfficialCaps ? 'UTILIZE OBRIGATORIAMENTE as Capacidades Técnicas e Socioemocionais Oficiais listadas acima. Distribua todas elas entre as Situações de Aprendizagem.' : 'NUNCA FAÇA ABREVIAÇÕES DE CONTEÚDOS, CAPACIDADES OU CONHECIMENTOS.'} Reescreva a descrição técnica completa de cada capacidade e conhecimento, NUNCA utilize códigos ou siglas como 'K1', 'CT02' ou 'CS3'.
 2. Determine a quantidade adequada de Situações de Aprendizagem (SAs) para a carga horária (ex: 20h = 1 SA; 40-60h = 2 SAs; 80-100h = 3 SAs; 120-200h = 4 SAs).
 3. A soma exata do campo 'aulas' de todas as SAs DEVE SER EXATAMENTE IGUAL a ${totalHours} horas.
 4. Para cada SA:
@@ -388,9 +574,9 @@ Diretrizes Rigorosas do SENAI MSEP (Diretrizes Oficiais dos Prompts MSEP):
    - 'titulo': Título prático e estimulante contextualizado no mercado de trabalho industrial focado na Unidade Curricular "${courseUnit}".
    - 'aulas': Quantidade de horas (inteiro).
    - 'estrategiaTipo': 'Situação-problema', 'Projeto', 'Estudo de caso' ou 'Pesquisa aplicada' (conforme sugerido no Book MSEP).
-   - 'capacidadesTecnicas': Array com 2 a 4 capacidades técnicas completas sem abreviações.
+   - 'capacidadesTecnicas': Array com as capacidades técnicas oficiais atribuídas a esta SA.
    - 'capacidadesSocioemocionais': Array com 1 a 3 capacidades (ex: 'Demonstrar raciocínio lógico.', 'Demonstrar atenção a detalhes.', 'Demonstrar responsabilidade.').
-   - 'conhecimentos': Array com tópicos de conhecimentos técnicos e normas pertinentes (redação completa).
+   - 'conhecimentos': Array com tópicos de conhecimentos técnicos pertinentes (redação completa).
    - 'contextualizacao': Narrativa imersiva de uma empresa ou cenário industrial real com um problema a ser resolvido.
    - 'observacoesDocente': Instruções e dicas pedagógicas para a condução do professor (foco, mediação, segurança).
    - 'desafio': O desafio prático que os alunos devem solucionar.
@@ -399,9 +585,10 @@ Diretrizes Rigorosas do SENAI MSEP (Diretrizes Oficiais dos Prompts MSEP):
    - 'instrumentosAvaliacao': Instrumentos avaliativos (ex: 'Avaliação prática de desempenho; Relatório técnico; Checklist').
    - 'recursos': Máquinas, bancadas didáticas, ferramentas, instrumentos ou softwares específicos da área.
    - 'criterios': Array de objetos com critérios de avaliação observáveis redigidos rigorosamente no PRESENTE DO INDICATIVO:
-       - 'cap': Nome da capacidade ou "" se for desdobramento.
-       - 'crit': Texto do critério observável (ex: 'Parametriza o equipamento de acordo com as especificações técnicas.').
-       - 'tipo': "C" para Crítico (eliminatório) ou "D" para Desejável (formativo/qualidade). Balanceie rigorosamente entre C e D (50% C e 50% D).
+       - Para CADA capacidade técnica da SA, formule rigorosamente dois critérios observáveis no presente do indicativo:
+         1. Critério Crítico (C): Desempenho técnico essencial e inegociável da capacidade (inicie com o verbo no presente e marque com tipo "C").
+         2. Critério Desejável (D): Padrão de qualidade, acabamento, eficiência ou boas práticas (marque com tipo "D").
+       - Formule critérios para as capacidades socioemocionais (tipo "C" e "D"). Balanceie entre C e D.
 
 Retorne APENAS um JSON no seguinte formato:
 {
@@ -468,9 +655,10 @@ function callGemini(apiKey, prompt, modelName) {
             },
             timeout: 25000
         }, (res) => {
-            let resData = '';
-            res.on('data', chunk => { resData += chunk; });
+            const chunks = [];
+            res.on('data', chunk => { chunks.push(chunk); });
             res.on('end', () => {
+                const resData = Buffer.concat(chunks).toString('utf8');
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                     try {
                         const parsed = JSON.parse(resData);
@@ -565,9 +753,10 @@ function runGeminiPing(apiKey, modelName) {
             },
             timeout: 10000
         }, (res) => {
-            let resData = '';
-            res.on('data', chunk => { resData += chunk; });
+            const chunks = [];
+            res.on('data', chunk => { chunks.push(chunk); });
             res.on('end', () => {
+                const resData = Buffer.concat(chunks).toString('utf8');
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                     resolve({ success: true, message: `Conexão com Google Gemini (${modelName}) validada com sucesso!` });
                 } else {
@@ -593,6 +782,37 @@ function runGeminiPing(apiKey, modelName) {
         req.write(requestBody);
         req.end();
     });
+}
+
+function conjugateToPresentIndicative(verb) {
+    if (!verb) return 'Executa';
+    const v = verb.toLowerCase().trim();
+    const irregulars = {
+        'fazer': 'faz', 'construir': 'constrói', 'distinguir': 'distingue',
+        'substituir': 'substitui', 'medir': 'mede', 'manter': 'mantém',
+        'obter': 'obtém', 'prever': 'prevê', 'propor': 'propõe',
+        'ver': 'vê', 'ler': 'lê', 'dar': 'dá', 'ir': 'vai'
+    };
+    if (irregulars[v]) return irregulars[v];
+    if (v.endsWith('ar')) return v.slice(0, -2) + 'a';
+    if (v.endsWith('er')) return v.slice(0, -2) + 'e';
+    if (v.endsWith('ir')) return v.slice(0, -2) + 'e';
+    return v;
+}
+
+function formulateCriteriaFromCapability(capText, courseName) {
+    const clean = capText.replace(/\.$/, '').trim();
+    const words = clean.split(/\s+/);
+    const firstWord = words[0] || 'Executar';
+    const conjugated = conjugateToPresentIndicative(firstWord);
+    const capRest = words.slice(1).join(' ');
+
+    const conjugatedCap = `${conjugated.charAt(0).toUpperCase() + conjugated.slice(1)} ${capRest}`;
+
+    const critico = `${conjugatedCap}, atendendo aos parâmetros técnicos e especificações requeridas.`;
+    const desejavel = `Aplica normas técnicas, requisitos de qualidade e boas práticas operacionais com rigor e organização.`;
+
+    return { critico, desejavel };
 }
 
 function buildGenericDynamicPlan(courseInfo) {
@@ -802,35 +1022,44 @@ function buildGenericDynamicPlan(courseInfo) {
 
         const saCriterios = [];
         assignedCaps.forEach((capText) => {
+            const { critico, desejavel } = formulateCriteriaFromCapability(capText, courseName);
             saCriterios.push({
                 row: currentRow++,
                 cap: capText,
-                crit: `Executa com precisão as atividades técnicas relacionadas à ${capText.toLowerCase().replace(/\.$/, '')}.`,
+                crit: critico,
                 tipo: "C"
             });
             saCriterios.push({
                 row: currentRow++,
                 cap: "",
-                crit: `Aplica boas práticas e normas de segurança pertinentes durante os procedimentos de ${courseName}.`,
+                crit: desejavel,
                 tipo: "D"
             });
         });
 
         const socioCap = capsSocio[(i - 1) % capsSocio.length];
+        const socioText = socioCap.replace(/^Demonstrar\s+/i, '');
         saCriterios.push({
             row: currentRow++,
             cap: socioCap,
-            crit: `Demonstra postura profissional e ${socioCap.toLowerCase().replace(/\.$/, '')} na resolução das demandas propostas.`,
+            crit: `Demonstra ${socioText.toLowerCase().replace(/\.$/, '')} durante o desenvolvimento das atividades práticas.`,
             tipo: "C"
         });
         saCriterios.push({
             row: currentRow++,
             cap: "",
-            crit: `Colabora ativamente com os colegas cumprindo prazos e instruções com zelo e organização.`,
+            crit: `Trabalha de forma colaborativa com a equipe, cumprindo normas de convivência e prazos estabelecidos.`,
             tipo: "D"
         });
 
         currentRow++;
+
+        let assignedConhec = cfg.conhecimentos || [`Fundamentos e procedimentos técnicos de ${courseUnit}.`];
+        if (Array.isArray(courseInfo.conhecimentos) && courseInfo.conhecimentos.length > 0) {
+            const startConIdx = Math.floor(((i - 1) / numSAs) * courseInfo.conhecimentos.length);
+            const endConIdx = Math.max(startConIdx + 1, Math.floor((i / numSAs) * courseInfo.conhecimentos.length));
+            assignedConhec = courseInfo.conhecimentos.slice(startConIdx, endConIdx);
+        }
 
         situacoes.push({
             numero: saNum,
@@ -839,7 +1068,7 @@ function buildGenericDynamicPlan(courseInfo) {
             estrategiaTipo: (i === 1) ? "Situação-problema" : (i === numSAs ? "Estudo de caso / Projeto Integrador" : "Projeto"),
             capacidadesTecnicas: assignedCaps,
             capacidadesSocioemocionais: [socioCap],
-            conhecimentos: cfg.conhecimentos || [`Fundamentos e procedimentos técnicos de ${courseUnit}.`],
+            conhecimentos: assignedConhec,
             contextualizacao: `${cfg.contextBase} O objetivo nesta etapa é analisar os requisitos técnicos, planejar a intervenção e executar os procedimentos de ${courseUnit} com máxima eficiência e qualidade.`,
             observacoesDocente: "Conduzir a mediação pedagógica estimulando o protagonismo dos alunos na resolução prática das tarefas em laboratório ou oficina.",
             desafio: `${cfg.desafioBase}`,
@@ -1196,8 +1425,18 @@ function compileIRRACXlsx(courseData) {
     };
 }
 
+// Safely read entire request body preserving multi-byte UTF-8 sequences
+function readRequestBody(req) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        req.on('data', chunk => chunks.push(chunk));
+        req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+        req.on('error', reject);
+    });
+}
+
 // Serverless Handler for Vercel / Cloud
-module.exports = (req, res) => {
+module.exports = async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -1230,14 +1469,14 @@ module.exports = (req, res) => {
     };
 
     if (isRoute('status') || (!routeParam && (rawPath === 'api' || rawPath === 'api/' || rawPath === 'api/index.js' || rawPath === 'api/index'))) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ status: 'online', version: '2.0.0', time: new Date() }));
         return;
     }
 
     if (isRoute('ai-status')) {
         const hasEnvKey = !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 10 && process.env.GEMINI_API_KEY !== 'sua_chave_gemini_aqui');
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({
             geminiConfigured: hasEnvKey,
             model: 'gemini-3.5-flash-lite',
@@ -1247,108 +1486,116 @@ module.exports = (req, res) => {
     }
 
     if (isRoute('test-gemini') || isRoute('test-groq')) {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', async () => {
-            try {
-                let parsedKey = null;
-                if (body && body.trim()) {
-                    const data = JSON.parse(body);
-                    parsedKey = data.apiKey;
-                }
-                const result = await testGeminiConnection(parsedKey);
-                res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(result));
-            } catch (err) {
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: err.message }));
+        try {
+            const body = await readRequestBody(req);
+            let parsedKey = null;
+            if (body && body.trim()) {
+                const data = JSON.parse(body);
+                parsedKey = data.apiKey;
             }
-        });
+            const result = await testGeminiConnection(parsedKey);
+            res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(result));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: false, error: err.message }));
+        }
         return;
     }
 
-    if (isRoute('samples')) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (isRoute('samples') || isRoute('courses')) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(SAMPLE_COURSES));
         return;
     }
 
-    if (isRoute('generate-msep')) {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', async () => {
-            try {
-                const data = JSON.parse(body);
-                const plan = await generateMSEPPlan(data);
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: true, plan }));
-            } catch (err) {
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: err.message }));
-            }
-        });
+    if (isRoute('generate-msep') || isRoute('generate-plan')) {
+        try {
+            const body = await readRequestBody(req);
+            const data = JSON.parse(body);
+            const plan = await generateMSEPPlan(data);
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: true, plan }));
+        } catch (err) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: false, error: err.message }));
+        }
         return;
     }
 
     if (isRoute('export-irrac')) {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-            try {
-                const courseData = JSON.parse(body);
-                const compileResult = compileIRRACXlsx(courseData);
-                const xlsxBuffer = compileResult.buffer || compileResult;
-                const safeName = (compileResult.safeUnitSigla || courseData.unitSigla || 'IRRAC').replace(/[^a-zA-Z0-9-_]/g, '_');
-                res.writeHead(200, {
-                    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    'Content-Disposition': `attachment; filename="IRRAC - ${safeName}.xlsx"`,
-                    'Content-Length': xlsxBuffer.length
-                });
-                res.end(xlsxBuffer);
-            } catch (err) {
-                console.error('Error exporting IRRAC:', err);
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: err.message }));
-            }
-        });
+        try {
+            const body = await readRequestBody(req);
+            const courseData = JSON.parse(body);
+            const compileResult = compileIRRACXlsx(courseData);
+            const xlsxBuffer = compileResult.buffer || compileResult;
+            const safeName = (compileResult.safeUnitSigla || courseData.unitSigla || 'IRRAC').replace(/[^a-zA-Z0-9-_]/g, '_');
+            res.writeHead(200, {
+                'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'Content-Disposition': `attachment; filename="IRRAC - ${safeName}.xlsx"`,
+                'Content-Length': xlsxBuffer.length
+            });
+            res.end(xlsxBuffer);
+        } catch (err) {
+            console.error('Error exporting IRRAC:', err);
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+        return;
+    }
+
+    if (isRoute('export-plano-docx')) {
+        try {
+            const body = await readRequestBody(req);
+            const planData = JSON.parse(body);
+            const docxBuffer = compilePlanoDocx(planData);
+            const safeName = (planData.unidade || planData.sigla || planData.curso || 'Plano_de_Ensino').replace(/[^a-zA-Z0-9-_]/g, '_');
+            res.writeHead(200, {
+                'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'Content-Disposition': `attachment; filename="Plano_de_Ensino - ${safeName}.docx"`,
+                'Content-Length': docxBuffer.length
+            });
+            res.end(docxBuffer);
+        } catch (err) {
+            console.error('Error exporting Plano DOCX:', err);
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: false, error: err.message }));
+        }
         return;
     }
 
     if (isRoute('parse-course-plan')) {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', async () => {
-            try {
-                const data = JSON.parse(body);
-                const fileName = data.fileName || 'plano_de_curso.pdf';
-                const apiKey = data.apiKey || process.env.GEMINI_API_KEY;
+        try {
+            const body = await readRequestBody(req);
+            const data = JSON.parse(body);
+            const fileName = data.fileName || 'plano_de_curso.pdf';
+            const apiKey = data.apiKey || process.env.GEMINI_API_KEY;
 
-                let text = '';
-                if (data.fileData) {
-                    const buf = Buffer.from(data.fileData, 'base64');
-                    text = extractPdfText(buf);
-                } else if (data.text) {
-                    text = data.text;
-                }
-
-                let parsedResult;
-                if (text && text.trim().length > 20) {
-                    parsedResult = await parseCoursePlanWithGemini(text, fileName, apiKey);
-                } else {
-                    parsedResult = parseCoursePlanHeuristic(text, fileName);
-                }
-
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: true, ...parsedResult }));
-            } catch (err) {
-                console.error('Error parsing course plan:', err);
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ success: false, error: err.message }));
+            let text = '';
+            if (data.fileData) {
+                const buf = Buffer.from(data.fileData, 'base64');
+                text = extractPdfText(buf);
+            } else if (data.text) {
+                text = data.text;
             }
-        });
+
+            let parsedResult;
+            if (text && text.trim().length > 20) {
+                parsedResult = await parseCoursePlanWithGemini(text, fileName, apiKey);
+            } else {
+                parsedResult = parseCoursePlanHeuristic(text, fileName);
+            }
+
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: true, ...parsedResult }));
+        } catch (err) {
+            console.error('Error parsing course plan:', err);
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: false, error: err.message }));
+        }
         return;
     }
 
-    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ error: 'Route not found', requestedRoute: routeParam || rawPath }));
 };

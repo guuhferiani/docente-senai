@@ -276,6 +276,12 @@ function selectCourseUnit(uc) {
     currentCourseData.workload = uc.cargaHoraria || 80;
     currentCourseData.unitSigla = generateSigla(uc.nome);
 
+    // Save official syllabus data from Course Plan PDF
+    currentCourseData.capacidadesTecnicas = uc.capacidadesTecnicas || (uc.detalhes && uc.detalhes.capacidadesTecnicas) || [];
+    currentCourseData.capacidadesSocioemocionais = uc.capacidadesSocioemocionais || (uc.detalhes && uc.detalhes.capacidadesSocioemocionais) || [];
+    currentCourseData.conhecimentos = uc.conhecimentos || (uc.detalhes && uc.detalhes.conhecimentos) || [];
+    currentCourseData.objetivoUC = uc.objetivo || (uc.detalhes && uc.detalhes.objetivo) || currentCourseData.objetivoUC || '';
+
     // Populate input fields
     const inpUnit = document.getElementById('inp-course-unit');
     if (inpUnit) inpUnit.value = uc.nome;
@@ -285,6 +291,11 @@ function selectCourseUnit(uc) {
 
     const inpSigla = document.getElementById('inp-unit-sigla');
     if (inpSigla) inpSigla.value = currentCourseData.unitSigla;
+
+    const inpObj = document.getElementById('inp-objetivo-uc');
+    if (inpObj && currentCourseData.objetivoUC) {
+        inpObj.value = currentCourseData.objetivoUC;
+    }
 
     // Check remote hours (Ajuste 4)
     const hasRemote = (uc.remotoHoras && uc.remotoHoras > 0) || uc.hasRemoto;
@@ -326,7 +337,37 @@ function selectCourseUnit(uc) {
 
     renderUCChips();
     updateClassCalculationUI();
+    updateEmentaBadgeUI();
     saveToLocalStorage();
+}
+
+// Visual confirmation badge for loaded official syllabus
+function updateEmentaBadgeUI() {
+    let badge = document.getElementById('uc-ementa-badge');
+    if (!badge) {
+        const wrapper = document.getElementById('uc-selection-wrapper');
+        if (wrapper) {
+            badge = document.createElement('div');
+            badge.id = 'uc-ementa-badge';
+            badge.className = 'uc-ementa-badge';
+            wrapper.appendChild(badge);
+        }
+    }
+    if (badge) {
+        const caps = currentCourseData.capacidadesTecnicas || [];
+        const conhec = currentCourseData.conhecimentos || [];
+        if (caps.length > 0) {
+            badge.style.display = 'flex';
+            badge.innerHTML = `
+                <div class="ementa-badge-content">
+                    <span class="badge-check">✅</span>
+                    <span><strong>Ementa Oficial do Plano de Curso:</strong> ${caps.length} Capacidades Técnicas • ${conhec.length} Tópicos de Conteúdo vinculados</span>
+                </div>
+            `;
+        } else {
+            badge.style.display = 'none';
+        }
+    }
 }
 
 function updateEadBreakdownSummary(totalAulas) {
@@ -634,11 +675,33 @@ function initEventListeners() {
     // Navigation buttons
     document.getElementById('btn-back-step-1').addEventListener('click', () => goToStep(1));
     document.getElementById('btn-generate-msep-flow').addEventListener('click', handleGenerateMSEP);
-    document.getElementById('btn-proceed-export').addEventListener('click', () => {
-        syncMsepPlanFromUI();
-        saveToLocalStorage();
-        renderExportAndDocView();
-        goToStep(4);
+    document.getElementById('btn-proceed-export').addEventListener('click', async () => {
+        const btnExport = document.getElementById('btn-proceed-export');
+        setButtonLoading(btnExport, true, 'Avançando...');
+
+        showLoading({
+            badge: 'MSEP Docente SENAI',
+            title: 'Avançando para Exportação...',
+            message: 'Sincronizando dados pedagógicos e preparando a documentação oficial...',
+            stages: [
+                'Sincronizando Situações de Aprendizagem e critérios',
+                'Calculando tabela oficial de 10 níveis de desempenho',
+                'Formatando prévia institucional e liberando exportações'
+            ],
+            stageIntervalMs: 180
+        });
+
+        try {
+            syncMsepPlanFromUI();
+            saveToLocalStorage();
+            renderExportAndDocView();
+            goToStep(4);
+        } finally {
+            setTimeout(async () => {
+                setButtonLoading(btnExport, false);
+                await hideLoading(400);
+            }, 350);
+        }
     });
 
     // Dynamic SA Control: Add new SA
@@ -646,10 +709,17 @@ function initEventListeners() {
 
     // Export buttons
     document.getElementById('btn-download-xlsx').addEventListener('click', handleDownloadIRRAC);
+    const btnDownloadDocx = document.getElementById('btn-download-docx');
+    if (btnDownloadDocx) {
+        btnDownloadDocx.addEventListener('click', handleDownloadPlanoDocx);
+    }
+
+
     document.getElementById('btn-print-plano').addEventListener('click', () => {
         const originalTitle = document.title;
         const cleanName = (currentCourseData.courseName || 'SENAI_MSEP').replace(/[^a-zA-Z0-9-_]/g, '_');
         document.title = `Plano de Ensino - ${cleanName}`;
+        showToast('📄 Dica: Na janela de impressão, desmarque "Cabeçalhos e rodapés" caso seu navegador exiba data ou nome.');
         window.print();
         setTimeout(() => {
             document.title = originalTitle;
@@ -749,6 +819,135 @@ function initEventListeners() {
             document.querySelectorAll('.custom-select-wrap.open').forEach(w => w.classList.remove('open'));
         }
     });
+}
+
+// ==============================================================================
+// Global Loading Animation Controller (AI & Step Progression)
+// ==============================================================================
+let loadingStageTimer = null;
+let loadingStartTimestamp = 0;
+
+function setButtonLoading(btn, isLoading, loadingText = 'Carregando...') {
+    if (!btn) return;
+    if (isLoading) {
+        btn.classList.add('btn-loading');
+        btn.disabled = true;
+        if (!btn.dataset.originalHtml) {
+            btn.dataset.originalHtml = btn.innerHTML;
+        }
+        btn.innerHTML = `
+            <span class="btn-spinner"></span>
+            <span>${loadingText}</span>
+        `;
+    } else {
+        btn.classList.remove('btn-loading');
+        btn.disabled = false;
+        if (btn.dataset.originalHtml) {
+            btn.innerHTML = btn.dataset.originalHtml;
+            delete btn.dataset.originalHtml;
+        }
+    }
+}
+
+function showLoading(options = {}) {
+    const overlay = document.getElementById('global-loading-overlay');
+    if (!overlay) return;
+
+    const titleEl = document.getElementById('loading-title');
+    const msgEl = document.getElementById('loading-message');
+    const badgeEl = document.getElementById('loading-badge-text');
+    const stagesWrapper = document.getElementById('loading-stages-wrapper');
+    const stagesList = document.getElementById('loading-stages-list');
+
+    const badge = options.badge || 'INTELIGÊNCIA ARTIFICIAL SENAI';
+    const title = options.title || 'Processando com IA...';
+    const message = options.message || 'Aguarde enquanto a requisição é processada com segurança.';
+    const stages = options.stages || [];
+    const stageIntervalMs = options.stageIntervalMs || 2200;
+
+    loadingStartTimestamp = Date.now();
+
+    if (badgeEl) badgeEl.textContent = badge;
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) msgEl.textContent = message;
+
+    if (stagesList) {
+        stagesList.innerHTML = '';
+        if (stages.length > 0) {
+            stagesWrapper.style.display = 'block';
+            stages.forEach((st, idx) => {
+                const item = document.createElement('div');
+                item.className = `loading-stage-item ${idx === 0 ? 'active' : ''}`;
+                item.id = `loading-stage-item-${idx}`;
+                item.innerHTML = `
+                    <span class="stage-bullet">${idx === 0 ? '⚡' : '○'}</span>
+                    <span class="stage-text">${st}</span>
+                `;
+                stagesList.appendChild(item);
+            });
+
+            if (loadingStageTimer) clearInterval(loadingStageTimer);
+            let currentStageIdx = 0;
+            loadingStageTimer = setInterval(() => {
+                if (currentStageIdx < stages.length - 1) {
+                    const prevItem = document.getElementById(`loading-stage-item-${currentStageIdx}`);
+                    if (prevItem) {
+                        prevItem.className = 'loading-stage-item completed';
+                        const bullet = prevItem.querySelector('.stage-bullet');
+                        if (bullet) bullet.textContent = '✓';
+                    }
+                    currentStageIdx++;
+                    const nextItem = document.getElementById(`loading-stage-item-${currentStageIdx}`);
+                    if (nextItem) {
+                        nextItem.className = 'loading-stage-item active';
+                        const bullet = nextItem.querySelector('.stage-bullet');
+                        if (bullet) bullet.textContent = '⚡';
+                    }
+                }
+            }, stageIntervalMs);
+        } else {
+            stagesWrapper.style.display = 'none';
+        }
+    }
+
+    overlay.style.display = 'flex';
+    requestAnimationFrame(() => {
+        overlay.classList.add('active');
+        document.body.classList.add('loading-active');
+    });
+}
+
+function updateLoadingMessage(message, title = null) {
+    const msgEl = document.getElementById('loading-message');
+    if (msgEl && message) msgEl.textContent = message;
+    if (title) {
+        const titleEl = document.getElementById('loading-title');
+        if (titleEl) titleEl.textContent = title;
+    }
+}
+
+async function hideLoading(minDisplayTimeMs = 300) {
+    if (loadingStageTimer) {
+        clearInterval(loadingStageTimer);
+        loadingStageTimer = null;
+    }
+
+    const elapsed = Date.now() - loadingStartTimestamp;
+    const remaining = Math.max(0, minDisplayTimeMs - elapsed);
+    if (remaining > 0) {
+        await new Promise(r => setTimeout(r, remaining));
+    }
+
+    const overlay = document.getElementById('global-loading-overlay');
+    if (!overlay) return;
+
+    overlay.classList.remove('active');
+    document.body.classList.remove('loading-active');
+    setTimeout(() => {
+        if (!overlay.classList.contains('active')) {
+            overlay.style.display = 'none';
+        }
+    }, 280);
 }
 
 // Step Navigation
@@ -935,6 +1134,9 @@ function populateStep2Inputs() {
 
     // Refresh real-time hours to class conversion
     updateClassCalculationUI();
+
+    // Refresh official syllabus indicator badge
+    updateEmentaBadgeUI();
 }
 
 // Sync inputs to currentCourseData
@@ -1015,6 +1217,18 @@ function handleFileUpload(file) {
     updateStep1FileCard(fileSizeKB, '⏳ Analisando Plano de Curso com IA (detectando nível, estrutura e UCs)...');
     showToast(`Carregando "${fileName}" e analisando matriz curricular...`);
 
+    showLoading({
+        badge: 'Google Gemini & Parser MSEP',
+        title: 'Analisando Plano de Curso com IA...',
+        message: `Processando "${fileName}" para extrair matriz curricular, nível e ementa oficial...`,
+        stages: [
+            'Lendo camadas de texto e estrutura do PDF',
+            'Identificando nível de ensino, carga horária e modalidade',
+            'Mapeando Unidades Curriculares, capacidades e conhecimentos'
+        ],
+        stageIntervalMs: 2000
+    });
+
     const reader = new FileReader();
     reader.onload = async function(e) {
         try {
@@ -1076,12 +1290,15 @@ function handleFileUpload(file) {
             updateStep1FileCard(fileSizeKB);
             saveToLocalStorage();
             showToast(`Plano anexado! Revise os dados no Passo 2.`);
+        } finally {
+            await hideLoading(450);
         }
     };
-    reader.onerror = function() {
+    reader.onerror = async function() {
         populateStep2Inputs();
         updateStep1FileCard(fileSizeKB);
         saveToLocalStorage();
+        await hideLoading(200);
     };
     reader.readAsDataURL(file);
 }
@@ -1159,7 +1376,22 @@ async function handleGenerateMSEP() {
         currentCourseData.docente = 'Docente Responsável';
     }
 
-    showToast('Gerando Situações de Aprendizagem MSEP Modular...');
+    const btnGen = document.getElementById('btn-generate-msep-flow');
+    setButtonLoading(btnGen, true, 'Gerando com IA...');
+
+    const ucName = currentCourseData.courseUnit || currentCourseData.courseName;
+    showLoading({
+        badge: 'Google Gemini 2.5 Flash',
+        title: 'Gerando Plano de Ensino MSEP com IA...',
+        message: `Construindo Situações de Aprendizagem, desafios e critérios de avaliação para "${ucName}"...`,
+        stages: [
+            'Analisando ementa oficial e objetivos da Unidade Curricular',
+            'Formulando contextualizações e desafios práticos da indústria',
+            'Distribuindo carga horária e estruturando estratégias (5 colunas)',
+            'Mapeando critérios de avaliação (Críticos em negrito e Desejáveis)'
+        ],
+        stageIntervalMs: 2400
+    });
 
     try {
         const payload = {
@@ -1175,7 +1407,7 @@ async function handleGenerateMSEP() {
 
         if (response.ok) {
             const data = await response.json();
-            currentMsepPlan = data.plan;
+            currentMsepPlan = sanitizePlanObject(data.plan);
             saveToLocalStorage();
             renderMSEPViewer();
             goToStep(3);
@@ -1191,6 +1423,9 @@ async function handleGenerateMSEP() {
     } catch (err) {
         console.error('Error generating MSEP:', err);
         showToast('Erro ao gerar MSEP. Verifique os dados inseridos.');
+    } finally {
+        setButtonLoading(btnGen, false);
+        await hideLoading(450);
     }
 }
 
@@ -1457,6 +1692,13 @@ function attachDynamicMSEPHandlers() {
 // Add New SA
 function handleAddNewSA() {
     if (!currentMsepPlan) return;
+
+    const btnAdd = document.getElementById('btn-add-sa');
+    if (btnAdd) {
+        btnAdd.classList.add('btn-pulse-active');
+        setTimeout(() => btnAdd.classList.remove('btn-pulse-active'), 250);
+    }
+
     syncMsepPlanFromUI();
 
     const newNum = String(currentMsepPlan.situacoes.length + 1).padStart(2, '0');
@@ -1486,6 +1728,19 @@ function handleAddNewSA() {
     saveToLocalStorage();
     renderMSEPViewer();
     showToast(`Situação de Aprendizagem ${newNum} adicionada!`);
+
+    const newIdx = currentMsepPlan.situacoes.length - 1;
+    const newCard = document.getElementById(`sa-card-${newIdx}`);
+    if (newCard) {
+        newCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        newCard.style.transition = 'box-shadow 0.3s ease, border-color 0.3s ease';
+        newCard.style.borderColor = 'var(--primary)';
+        newCard.style.boxShadow = '0 0 0 3px rgba(227, 6, 19, 0.2)';
+        setTimeout(() => {
+            newCard.style.borderColor = '';
+            newCard.style.boxShadow = '';
+        }, 1500);
+    }
 }
 
 // Synchronize edits made in Step 3 UI back into state
@@ -1591,7 +1846,7 @@ function renderExportAndDocView() {
             <tr>
                 <td colspan="2">
                     <strong>Carga horária prevista para o desenvolvimento da Situação de Aprendizagem:</strong><br>
-                    ${currentMsepPlan.situacoes.map(sa => `• Situação de Aprendizagem ${sa.numero}: ${sa.aulas} aulas`).join('<br>')}
+                    ${currentMsepPlan.situacoes.map(sa => `◦ Situação de Aprendizagem ${sa.numero}: ${sa.cargaHoraria || Math.round((sa.aulas * 45) / 60)} horas (${sa.aulas} aulas).`).join('<br>')}
                 </td>
             </tr>
             <tr>
@@ -1601,6 +1856,7 @@ function renderExportAndDocView() {
     `;
 
     currentMsepPlan.situacoes.forEach((sa, idx) => {
+        const capListAll = [...(sa.capacidadesTecnicas || []), ...(sa.capacidadesSocioemocionais || [])];
         docHTML += `
             <div class="${idx > 0 ? 'print-page-break' : ''}">
                 <div class="doc-sa-title">SITUAÇÃO DE APRENDIZAGEM ${sa.numero} - ${sa.titulo}</div>
@@ -1609,19 +1865,19 @@ function renderExportAndDocView() {
                     <tr>
                         <td>
                             <strong>Capacidades Técnicas:</strong><br>
-                            ${(sa.capacidadesTecnicas || []).map(c => `• ${c}`).join('<br>')}
+                            ${(sa.capacidadesTecnicas || []).map(c => `• ${c}`).join('<br>') || '-'}
                         </td>
                     </tr>
                     <tr>
                         <td>
                             <strong>Capacidades Socioemocionais:</strong><br>
-                            ${(sa.capacidadesSocioemocionais || []).map(c => `• ${c}`).join('<br>')}
+                            ${(sa.capacidadesSocioemocionais || []).map(c => `• ${c}`).join('<br>') || '-'}
                         </td>
                     </tr>
                     <tr>
                         <td>
                             <strong>Conhecimentos Relacionados:</strong><br>
-                            ${(sa.conhecimentos || []).map(k => `• ${k}`).join('<br>')}
+                            ${(sa.conhecimentos || []).map(k => `• ${k}`).join('<br>') || '-'}
                         </td>
                     </tr>
                 </table>
@@ -1633,6 +1889,7 @@ function renderExportAndDocView() {
                     <tr>
                         <td>
                             <strong>Contextualização:</strong><br>
+                            ${sa.contextualizacaoTitulo ? `<strong>Título:</strong> ${sa.contextualizacaoTitulo}<br><br>` : ''}
                             ${sa.contextualizacao}
                         </td>
                     </tr>
@@ -1660,66 +1917,89 @@ function renderExportAndDocView() {
                 <table class="senai-table-doc">
                     <thead>
                         <tr>
-                            <th style="width: 15%;">Nº Horas / Aulas</th>
-                            <th style="width: 45%;">Estratégias de Ensino e Instrumentos de Avaliação</th>
-                            <th style="width: 40%;">Recursos e Ambientes Pedagógicos</th>
+                            <th style="width: 10%; text-align: center;">Nº Horas / Aulas</th>
+                            <th style="width: 25%;">Capacidades a serem trabalhadas</th>
+                            <th style="width: 25%;">Conhecimentos relacionados</th>
+                            <th style="width: 22%;">Estratégias de ensino e instrumentos de avaliação</th>
+                            <th style="width: 18%;">Recursos e ambientes pedagógicos</th>
                         </tr>
                     </thead>
                     <tbody>
                         <tr>
-                            <td>${sa.aulas} aulas</td>
+                            <td style="text-align: center; font-weight: bold;">${sa.aulas} aulas</td>
+                            <td>${capListAll.map(c => `• ${c}`).join('<br>') || '-'}</td>
+                            <td>${(sa.conhecimentos || []).map(k => `• ${k}`).join('<br>') || '-'}</td>
                             <td>
-                                <strong>Estratégias de Ensino:</strong><br>${sa.estrategiasEnsino}<br><br>
-                                <strong>Instrumentos de Avaliação:</strong><br>${sa.instrumentosAvaliacao}
+                                <strong>Estratégias:</strong><br>${sa.estrategiasEnsino || sa.estrategiaTipo || '-'}<br><br>
+                                <strong>Avaliação:</strong><br>${sa.instrumentosAvaliacao || '-'}
                             </td>
-                            <td>${sa.recursos}</td>
+                            <td>${sa.recursos || '-'}</td>
                         </tr>
                     </tbody>
                 </table>
 
-                <div class="doc-sa-title">INSTRUMENTO DE REGISTRO - CRITÉRIOS DE AVALIAÇÃO</div>
+                <div class="doc-sa-title">INSTRUMENTO DE REGISTRO</div>
+                <table class="senai-table-doc" style="margin-bottom: 0.25rem;">
+                    <tr>
+                        <td style="width: 70%;"><strong>Nome do aluno:</strong> __________________________________________________</td>
+                        <td style="width: 30%;"><strong>Turma:</strong> ${currentMsepPlan.turma || '___________________'}</td>
+                    </tr>
+                </table>
                 <table class="senai-table-doc">
                     <thead>
                         <tr>
-                            <th style="width: 30%;">Capacidade</th>
-                            <th style="width: 55%;">Critérios de Avaliação</th>
-                            <th style="width: 15%; text-align: center;">Tipo</th>
+                            <th style="width: 30%;">Capacidades técnicas e socioemocionais</th>
+                            <th style="width: 50%;">Critérios de Avaliação</th>
+                            <th style="width: 10%; text-align: center;">Aluno</th>
+                            <th style="width: 10%; text-align: center;">Professor</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${sa.criterios.map(c => `
                             <tr>
                                 <td>${c.cap || '-'}</td>
-                                <td class="${c.tipo === 'C' ? 'doc-bold' : ''}">${c.crit}</td>
-                                <td style="text-align: center; font-weight: bold;">${c.tipo === 'C' ? 'Crítico (C)' : 'Desejável (D)'}</td>
+                                <td class="${c.tipo === 'C' ? 'doc-bold' : ''}">
+                                    ${c.tipo === 'C' ? `<strong>${c.crit}</strong>` : c.crit}
+                                </td>
+                                <td style="text-align: center;"></td>
+                                <td style="text-align: center;"></td>
                             </tr>
                         `).join('')}
                     </tbody>
                 </table>
+                <div style="font-size: 0.75rem; color: #555; margin-bottom: 1.5rem;">
+                    <strong>Legenda:</strong> A = Atingiu | N = Não atingiu | <strong>Negrito</strong> = Crítico | Sem negrito = Desejável
+                </div>
             </div>
         `;
     });
 
-    // Performance Conversion Table
+    // Performance Conversion Table (10 a 1)
+    const niveisList = calculateNiveisDesempenho(totalCrit, totalDesej);
     docHTML += `
         <div class="print-page-break">
             <div class="senai-doc-header">
-                <h2>TABELA DE NÍVEIS DE DESEMPENHO E CONVERSÃO</h2>
+                <h2>TABELA DE NÍVEIS DE DESEMPENHO</h2>
+                <div style="font-size: 0.8rem; color: #555; margin-top: 0.25rem;">
+                    <strong>Legenda:</strong> Negrito = Crítico | Sem negrito = Desejável | A = Atingiu | N = Não atingiu
+                </div>
             </div>
             <table class="senai-table-doc">
                 <thead>
                     <tr>
                         <th style="width: 60%;">Critérios de Avaliação</th>
-                        <th style="width: 20%; text-align: center;">Nível de Desempenho</th>
-                        <th style="width: 20%; text-align: center;">Conversão em Notas</th>
+                        <th style="width: 20%; text-align: center;">Nível de desempenho</th>
+                        <th style="width: 20%; text-align: center;">Conversão em notas</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr><td>Atingiu 100% dos critérios críticos (${totalCrit})</td><td style="text-align:center;">5</td><td style="text-align:center;">100</td></tr>
-                    <tr><td>Atingiu no mínimo 80% dos critérios críticos</td><td style="text-align:center;">4</td><td style="text-align:center;">85</td></tr>
-                    <tr><td>Atingiu no mínimo 60% dos critérios críticos</td><td style="text-align:center;">3</td><td style="text-align:center;">65</td></tr>
-                    <tr><td>Atingiu no mínimo 40% dos critérios críticos</td><td style="text-align:center;">2</td><td style="text-align:center;">45</td></tr>
-                    <tr><td>Atingiu menos de 40% dos critérios críticos</td><td style="text-align:center;">1</td><td style="text-align:center;">25</td></tr>
+                    ${niveisList.map(n => `
+                        <tr>
+                            <td>${n.crit}</td>
+                            <td style="text-align: center; font-weight: bold;">${n.nivel}</td>
+                            <td style="text-align: center; font-weight: bold;">${n.nota}</td>
+                        </tr>
+                    `).join('')}
                 </tbody>
             </table>
         </div>
@@ -1727,6 +2007,99 @@ function renderExportAndDocView() {
 
     docContainer.innerHTML = docHTML;
 }
+
+/**
+ * Calcula os 10 níveis oficiais de desempenho (10 a 1) e notas (100 a 10)
+ */
+function calculateNiveisDesempenho(totalCrit, totalDesej) {
+    const C = Math.max(0, totalCrit || 0);
+    const D = Math.max(0, totalDesej || 0);
+    const total = C + D;
+
+    const d9 = Math.max(0, Math.min(D > 1 ? D - 1 : D, Math.round(D * 0.9)));
+    const d8 = Math.max(0, Math.min(d9, Math.round(D * 0.7)));
+    const d7 = Math.max(0, Math.min(d8, Math.round(D * 0.5)));
+    const d6 = Math.max(0, Math.min(d7, Math.round(D * 0.25)));
+
+    const c4 = Math.max(1, Math.min(C > 1 ? C - 1 : C, Math.round(C * 0.8)));
+    const c3 = Math.max(1, Math.min(c4, Math.round(C * 0.6)));
+    const c2 = Math.max(1, Math.min(c3, Math.round(C * 0.4)));
+    const c1 = Math.max(1, Math.min(c2, Math.round(C * 0.2)));
+
+    return [
+        { crit: `${C} Críticos + ${D} Desejáveis (Total: ${total})`, nivel: 10, nota: 100 },
+        { crit: `${C} Críticos + ${d9} Desejáveis`, nivel: 9, nota: 95 },
+        { crit: `${C} Críticos + ${d8} Desejáveis`, nivel: 8, nota: 85 },
+        { crit: `${C} Críticos + ${d7} Desejáveis`, nivel: 7, nota: 75 },
+        { crit: `${C} Críticos + ${d6} Desejáveis`, nivel: 6, nota: 60 },
+        { crit: `${C} Críticos + 0 Desejáveis`, nivel: 5, nota: 50 },
+        { crit: `${c4} Críticos + 0 Desejáveis`, nivel: 4, nota: 40 },
+        { crit: `${c3} Críticos + 0 Desejáveis`, nivel: 3, nota: 30 },
+        { crit: `${c2} Críticos + 0 Desejáveis`, nivel: 2, nota: 20 },
+        { crit: `${c1} Críticos + 0 Desejáveis`, nivel: 1, nota: 10 }
+    ];
+}
+
+// Download Plano de Ensino Oficial DOCX File
+async function handleDownloadPlanoDocx() {
+    const btnDocx = document.getElementById('btn-download-docx');
+    setButtonLoading(btnDocx, true, 'Compilando DOCX...');
+    syncMsepPlanFromUI();
+    saveToLocalStorage();
+    showToast('Compilando Plano de Ensino oficial (.docx)...');
+
+    showLoading({
+        badge: 'Compilador Oficial Word',
+        title: 'Compilando Plano de Ensino (.docx)...',
+        message: 'Preenchendo o modelo institucional SENAI-SP com desafios, quadro de 5 colunas e rubricas...',
+        stages: [
+            'Carregando modelo institucional SENAI-SP (.docx)',
+            'Inserindo contextualizações e quadro de estratégias',
+            'Formatando instrumentos com critérios críticos e 10 níveis'
+        ],
+        stageIntervalMs: 800
+    });
+
+    try {
+        const response = await fetch('/api/export-plano-docx', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(currentMsepPlan)
+        });
+
+        if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(errData.error || 'Falha ao compilar DOCX');
+        }
+
+        let downloadFilename = `Plano_de_Ensino - ${currentMsepPlan.unidade || currentMsepPlan.sigla || 'MSEP'}.docx`;
+        const disposition = response.headers.get('Content-Disposition');
+        if (disposition && disposition.includes('filename=')) {
+            const match = disposition.match(/filename="?([^"]+)"?/);
+            if (match && match[1]) downloadFilename = match[1];
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        a.remove();
+        showToast('✅ Plano de Ensino (.docx) baixado com sucesso!');
+    } catch (e) {
+        console.error('Download DOCX Error:', e);
+        showToast(`❌ Erro ao exportar DOCX: ${e.message}`);
+    } finally {
+        setButtonLoading(btnDocx, false);
+        await hideLoading(300);
+    }
+}
+
+
 
 // Download IRRAC XLSX File
 async function handleDownloadIRRAC() {
@@ -1736,9 +2109,22 @@ async function handleDownloadIRRAC() {
         return;
     }
 
+    const btnXlsx = document.getElementById('btn-download-xlsx');
+    setButtonLoading(btnXlsx, true, 'Compilando XLSX...');
     syncMsepPlanFromUI();
     saveToLocalStorage();
     showToast('Compilando planilha XLSX oficial...');
+
+    showLoading({
+        badge: 'Compilador Oficial Excel',
+        title: 'Compilando Planilha IRRAC (.xlsx)...',
+        message: 'Montando matriz de avaliação, critérios críticos e fórmulas institucionais...',
+        stages: [
+            'Validando carga horária e divisão das SAs',
+            'Gerando abas de Instrumentos e Níveis de Desempenho OpenXML'
+        ],
+        stageIntervalMs: 700
+    });
 
     const payload = {
         courseName: currentMsepPlan.curso,
@@ -1783,6 +2169,9 @@ async function handleDownloadIRRAC() {
     } catch (err) {
         console.error('Download error:', err);
         showToast('Erro ao baixar planilha. Tente novamente.');
+    } finally {
+        setButtonLoading(btnXlsx, false);
+        await hideLoading(300);
     }
 }
 
@@ -1802,13 +2191,33 @@ function saveToLocalStorage() {
     }
 }
 
+// Auto-heals corrupted UTF-8 split character artifacts (such as \uFFFD from former stream chunk splitting)
+function sanitizeUtf8String(str) {
+    if (!str || typeof str !== 'string') return str;
+    return str
+        .replace(/prop[\uFFFD\?]{1,2}s/gi, 'propôs')
+        .replace(/\uFFFD+/g, '');
+}
+
+function sanitizePlanObject(obj) {
+    if (!obj || typeof obj !== 'object') return obj;
+    for (const key of Object.keys(obj)) {
+        if (typeof obj[key] === 'string') {
+            obj[key] = sanitizeUtf8String(obj[key]);
+        } else if (typeof obj[key] === 'object' && obj[key] !== null) {
+            sanitizePlanObject(obj[key]);
+        }
+    }
+    return obj;
+}
+
 function loadFromLocalStorage() {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return false;
         const state = JSON.parse(raw);
-        if (state.currentCourseData) currentCourseData = state.currentCourseData;
-        if (state.currentMsepPlan) currentMsepPlan = state.currentMsepPlan;
+        if (state.currentCourseData) currentCourseData = sanitizePlanObject(state.currentCourseData);
+        if (state.currentMsepPlan) currentMsepPlan = sanitizePlanObject(state.currentMsepPlan);
         if (state.currentStep) currentStep = state.currentStep;
         return true;
     } catch (err) {

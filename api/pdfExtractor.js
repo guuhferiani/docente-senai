@@ -234,6 +234,37 @@ function parseCoursePlanHeuristic(text, fileName = '') {
         }
     }
 
+    // 6. Discover UCs from Ementa Section Headers (essential for FIC, single-UC, or courses with alternative tables)
+    const ementaHeaderPattern = /(?:UNIDADE\s+CURRICULAR|Unidade\s+Curricular)\s*:\s*(.*?)\s*[—–-]\s*(\d[\d\s]{0,4})\s*(?:h|horas?)\b/gi;
+    let mEmenta;
+    while ((mEmenta = ementaHeaderPattern.exec(text)) !== null) {
+        let rawName = mEmenta[1].replace(/\s+/g, ' ').replace(/[\s—–-]+$/, '').trim();
+        rawName = rawName.replace(/^(?:Módulo|Etapa)[^\w]*\w*\s*/i, '').trim();
+        const ch = parseInt(mEmenta[2].replace(/\s+/g, ''));
+        const key = rawName.toUpperCase();
+        if (!seenUcs.has(key) && ch >= 8 && ch <= 800 && rawName.length >= 4 && !/quadro|carga|página/i.test(rawName)) {
+            seenUcs.add(key);
+            unidades.push({
+                nome: rawName,
+                cargaHoraria: ch,
+                semestre: null,
+                remotoHoras: (hasRemoto && ch >= 60) ? Math.round(ch * 0.2) : 0
+            });
+        }
+    }
+
+    // 7. Deep Extraction: Enrich every detected UC with official Capacidades & Conhecimentos
+    for (const u of unidades) {
+        const details = extractUcDetailsFromText(text, u.nome);
+        if (details) {
+            u.detalhes = details;
+            u.objetivo = details.objetivo || '';
+            u.capacidadesTecnicas = details.capacidadesTecnicas || [];
+            u.capacidadesSocioemocionais = details.capacidadesSocioemocionais || [];
+            u.conhecimentos = details.conhecimentos || [];
+        }
+    }
+
     return {
         cursoNome,
         cursoTipo,
@@ -242,6 +273,152 @@ function parseCoursePlanHeuristic(text, fileName = '') {
         hasRemoteHours: hasRemoto,
         unidades: unidades.slice(0, 25),
         _extractedVia: 'heuristica'
+    };
+}
+
+/**
+ * Deep parser: Extracts Objetivo, Capacidades Técnicas, Capacidades Socioemocionais,
+ * and Conhecimentos for any Unidade Curricular from SENAI Course Plan text.
+ */
+function extractUcDetailsFromText(fullText, ucName) {
+    if (!fullText || !ucName) return null;
+
+    const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    const normNoSpace = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+    const targetNorm = norm(ucName);
+    const targetNoSpace = normNoSpace(ucName);
+
+    // 1. Locate all UC ementa section start headers
+    const headerRe = /(?:UNIDADE\s+CURRICULAR|Unidade\s+Curricular)\s*:\s*(.*?)\s*[—–-]\s*(\d[\d\s]{0,4})\s*(?:h|horas?)\b/gi;
+    let m;
+    const ucs = [];
+    while ((m = headerRe.exec(fullText)) !== null) {
+        let name = m[1].replace(/\s+/g, ' ').trim();
+        name = name.replace(/^(?:Módulo|Etapa)[^\w]*\w*\s*/i, '').trim();
+        const nextChunk = fullText.slice(m.index + m[0].length, m.index + m[0].length + 200);
+        const isEmentaStart = /Objetivo\s*[:]|CONTEÚDO|Capacidades/i.test(nextChunk);
+
+        ucs.push({
+            name,
+            ch: parseInt(m[2].replace(/\s+/g, '')),
+            index: m.index,
+            headerEnd: m.index + m[0].length,
+            isEmentaStart
+        });
+    }
+
+    const ementaUcs = ucs.filter(u => u.isEmentaStart);
+    const searchList = ementaUcs.length > 0 ? ementaUcs : ucs;
+
+    let matchedIdx = -1;
+    for (let i = 0; i < searchList.length; i++) {
+        const uNoSpace = normNoSpace(searchList[i].name);
+        if (uNoSpace.includes(targetNoSpace) || targetNoSpace.includes(uNoSpace)) {
+            matchedIdx = i;
+            break;
+        }
+    }
+
+    if (matchedIdx === -1) {
+        const tWords = targetNorm.split(' ').filter(w => w.length > 3);
+        for (let i = 0; i < searchList.length; i++) {
+            const uWords = norm(searchList[i].name).split(' ').filter(w => w.length > 3);
+            const matches = tWords.filter(w => uWords.includes(w)).length;
+            if (matches >= 2 || (matches >= 1 && (tWords.length === 1 || uWords.length === 1))) {
+                matchedIdx = i;
+                break;
+            }
+        }
+    }
+
+    let rawBlock = '';
+    if (matchedIdx !== -1) {
+        const start = searchList[matchedIdx].headerEnd;
+        const nextUc = searchList.slice(matchedIdx + 1).find(u => normNoSpace(u.name) !== normNoSpace(searchList[matchedIdx].name));
+        const end = nextUc ? nextUc.index : Math.min(start + 35000, fullText.length);
+        rawBlock = fullText.slice(start, end);
+    } else {
+        const idx = fullText.toLowerCase().indexOf(ucName.toLowerCase());
+        if (idx !== -1) {
+            rawBlock = fullText.slice(idx, idx + 25000);
+        } else {
+            return null;
+        }
+    }
+
+    // Clean page running headers and footers that repeat across pages
+    const cleanBlock = rawBlock.replace(/Plano\s+de\s+Curso[^\d]{1,60}Página\s+\d+\s+(?:de\s+\d+)?(?:\s*MÓDULO\s+[^\s]+)?(?:\s*UNIDADE\s+CURRICULAR:\s*[^—–-]{3,50}—\s*\d+\s*horas)?/gi, ' ');
+
+    // 1. Objetivo da UC
+    let objetivo = '';
+    const objM = cleanBlock.match(/Objetivo\s*[:]\s*(.*?)(?=(?:Competências\s+Específicas|Capacidades\s+(?:T[eé]cnicas|B[aá]sicas)\s*\d{1,2}\.|Capacidades\s+T[eé]cnicas\s*•|CONTEÚDO\s+FORMATIVO))/i);
+    let remainder = cleanBlock;
+    if (objM) {
+        objetivo = objM[1].replace(/\s+/g, ' ').trim();
+        remainder = cleanBlock.slice(objM.index + objM[0].length);
+    }
+
+    const endMatch = cleanBlock.match(/(?:Recomendações\s+Metodológicas|Ambiente[s]?\s+Pedagógico|Referências\s+Básicas|INSTALAÇÕES\s+E\s+EQUIPAMENTOS)/i);
+    const ucContent = endMatch ? remainder.slice(0, endMatch.index) : remainder;
+
+    // Collect all numbered items (\d+\. Text) and bullet items (• Text)
+    const items = [];
+    const numRe = /(?:^|\s)(\d{1,2}\.(?:\d{1,2}\.?)?)\s+([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][^\n\r]+?)(?=(?:\s+\d{1,2}\.|$|[•·]))/g;
+    let numM;
+    while ((numM = numRe.exec(ucContent)) !== null) {
+        items.push({ num: numM[1], text: numM[2].trim() });
+    }
+
+    const bulletRe = /[•·]\s*([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][^•·\n\r]{6,250})/g;
+    let bM;
+    while ((bM = bulletRe.exec(ucContent)) !== null) {
+        items.push({ num: '•', text: bM[1].trim() });
+    }
+
+    const capacidadesTecnicas = [];
+    const capacidadesSocioemocionais = [];
+    const conhecimentos = [];
+
+    const tecVerbs = /^(?:Identificar|Utilizar|Criar|Representar|Aplicar|Elaborar|Configurar|Normalizar|Documentar|Executar|Analisar|Calcular|Efetuar|Interpretar|Montar|Dimensionar|Definir|Descartar|Realizar|Corrigir|Operar|Estacionar|Manobrar|Movimentar|Distinguir|Carregar|Descarregar|Empilhar|Desempilhar|Apontar|Auxiliar|Controlar|Registrar|Classificar|Programar|Desenvolver|Testar|Implantar|Monitorar|Adequar|Emitir|Verificar|Localizar|Preencher|Instalar|Substituir|Revisar|Planejar|Reconhecer|Projetar|Simular|Inspecionar)\b/i;
+
+    for (const it of items) {
+        const rawText = it.text.replace(/;$/, '').replace(/\s+/g, ' ').trim();
+        if (/^(?:Plano|Página|Módulo|Unidade)/i.test(rawText)) continue;
+
+        // Socioemotional
+        if (/^Demonstrar\b/i.test(rawText) || /^Cumprir\s+procedimentos/i.test(rawText) || /^Preservar\b/i.test(rawText) || /^Prevenir\b/i.test(rawText) || /^Compartilhar\s+informa/i.test(rawText) || /^Trabalhar\s+em\s+equipe/i.test(rawText)) {
+            const cleanSoc = rawText.replace(/\s+Conhecimentos.*$/i, '').trim();
+            if (!capacidadesSocioemocionais.includes(cleanSoc)) {
+                capacidadesSocioemocionais.push(cleanSoc);
+            }
+        }
+        // Technical capability
+        else if (tecVerbs.test(rawText)) {
+            if (rawText.length > 12 && !capacidadesTecnicas.includes(rawText)) {
+                capacidadesTecnicas.push(rawText);
+            }
+        }
+        // Knowledge topic
+        else {
+            const conClean = (it.num !== '•' ? it.num + ' ' : '') + rawText;
+            if (rawText.length > 3 && !conhecimentos.includes(conClean)) {
+                conhecimentos.push(conClean);
+            }
+        }
+    }
+
+    // Default socioemotional if document did not list them separately
+    if (capacidadesSocioemocionais.length === 0) {
+        capacidadesSocioemocionais.push('Demonstrar atenção a detalhes e postura profissional.');
+        capacidadesSocioemocionais.push('Demonstrar raciocínio lógico e visão sistêmica.');
+        capacidadesSocioemocionais.push('Demonstrar responsabilidade e trabalho em equipe.');
+    }
+
+    return {
+        objetivo,
+        capacidadesTecnicas,
+        capacidadesSocioemocionais,
+        conhecimentos: conhecimentos.slice(0, 30)
     };
 }
 
@@ -309,9 +486,10 @@ ${cleanSnippet}`;
                     },
                     timeout: 20000
                 }, (res) => {
-                    let resData = '';
-                    res.on('data', chunk => { resData += chunk; });
+                    const chunks = [];
+                    res.on('data', chunk => { chunks.push(chunk); });
                     res.on('end', () => {
+                        const resData = Buffer.concat(chunks).toString('utf8');
                         if (res.statusCode >= 200 && res.statusCode < 300) {
                             try {
                                 const parsed = JSON.parse(resData);
@@ -340,6 +518,17 @@ ${cleanSnippet}`;
             });
 
             if (plan && plan.unidades && plan.unidades.length > 0) {
+                // Enrich every UC detected by Gemini with actual syllabus from PDF text
+                for (const u of plan.unidades) {
+                    const details = extractUcDetailsFromText(text, u.nome);
+                    if (details) {
+                        u.detalhes = details;
+                        u.objetivo = details.objetivo || '';
+                        u.capacidadesTecnicas = details.capacidadesTecnicas || [];
+                        u.capacidadesSocioemocionais = details.capacidadesSocioemocionais || [];
+                        u.conhecimentos = details.conhecimentos || [];
+                    }
+                }
                 return plan;
             }
         } catch (err) {}
@@ -351,6 +540,7 @@ ${cleanSnippet}`;
 
 module.exports = {
     extractPdfText,
+    extractUcDetailsFromText,
     parseCoursePlanHeuristic,
     parseCoursePlanWithGemini
 };

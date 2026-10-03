@@ -101,6 +101,7 @@
                             Selecionar Arquivo PDF
                         </button>
                     </div>
+
                 </div>
 
                 <!-- Attached File Preview Card (shown when file is loaded) -->
@@ -434,11 +435,15 @@
                     <div class="export-icon pdf-icon">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M9 15h6"></path><path d="M9 11h6"></path></svg>
                     </div>
-                    <h3>2. Plano de Ensino MSEP (Imprimir / PDF)</h3>
-                    <p>Documento institucional completo formatado nas normas SENAI-SP com desafios, quadro de estratégias, rubricas e níveis de desempenho.</p>
+                    <h3>2. Plano de Ensino Oficial MSEP (.DOCX / PDF)</h3>
+                    <p>Documento oficial SENAI-SP com desafios, estratégias (5 colunas), instrumentos de registro com critérios críticos em negrito e tabela oficial de 10 níveis de desempenho.</p>
 
                     <div class="card-buttons">
-                        <button class="btn btn-primary btn-lg" id="btn-print-plano">
+                        <button class="btn btn-primary btn-lg" id="btn-download-docx">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                            Baixar Plano de Ensino (.docx)
+                        </button>
+                        <button class="btn btn-secondary btn-lg" id="btn-print-plano">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                             Imprimir / Salvar em PDF
                         </button>
@@ -462,7 +467,19 @@
         </section>
     </main>
 
-    <!-- Modern Modal Dialog -->
+    <!-- Rodapé com Créditos -->
+    <footer class="app-footer no-print">
+        <div class="footer-container">
+            <span class="footer-text">Desenvolvido por <strong>Gustavo Feriani</strong></span>
+            <span class="footer-sep">•</span>
+            <a href="https://github.com/guuhferiani" target="_blank" rel="noopener noreferrer" class="footer-github-link" title="GitHub de Gustavo Feriani">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path>
+                </svg>
+                <span>github.com/guuhferiani</span>
+            </a>
+        </div>
+    </footer>
     <div id="modal-overlay" class="modal-backdrop" style="display: none;">
         <div class="modal-container" role="dialog" aria-modal="true">
             <div class="modal-header">
@@ -530,6 +547,45 @@
                     Testar Conexão
                 </button>
                 <button type="button" class="btn btn-primary" id="btn-save-gemini-key">Salvar e Ativar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Global Modern AI & Progression Loading Overlay -->
+    <div id="global-loading-overlay" class="loading-overlay" style="display: none;" role="status" aria-live="polite" aria-busy="true">
+        <div class="loading-card">
+            <!-- Animated Glowing AI Orb & Rotating Rings -->
+            <div class="loading-animation-container">
+                <div class="loading-orb-glow"></div>
+                <div class="loading-ring-outer"></div>
+                <div class="loading-ring-inner"></div>
+                <div class="loading-center-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- Content Area -->
+            <div class="loading-content">
+                <div class="loading-badge">
+                    <span class="loading-dot-pulse"></span>
+                    <span id="loading-badge-text">INTELIGÊNCIA ARTIFICIAL SENAI</span>
+                </div>
+                <h3 id="loading-title" class="loading-title">Gerando Plano de Ensino MSEP...</h3>
+                <p id="loading-message" class="loading-message">Aguarde enquanto o Google Gemini formula os desafios pedagógicos e critérios avaliativos.</p>
+            </div>
+
+            <!-- Sequential Stages Progress -->
+            <div class="loading-stages-wrapper" id="loading-stages-wrapper" style="display: none;">
+                <div class="loading-stages-list" id="loading-stages-list">
+                    <!-- Dynamic steps injected via JS -->
+                </div>
+            </div>
+
+            <!-- Shimmer Bar -->
+            <div class="loading-shimmer-track">
+                <div class="loading-shimmer-bar"></div>
             </div>
         </div>
     </div>
