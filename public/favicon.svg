@@ -1,20 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <defs>
     <linearGradient id="senaiRed" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#ea1d2c"/>
       <stop offset="100%" stop-color="#b8000b"/>
     </linearGradient>
   </defs>
-  <!-- Background Badge (SENAI Red Squircle) -->
-  <rect width="64" height="64" rx="16" fill="url(#senaiRed)"/>
-  <!-- Subtle border for high contrast in dark/light browser tabs -->
-  <rect x="1.5" y="1.5" width="61" height="61" rx="14.5" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="2"/>
-  <!-- Bold "S" Initial -->
-  <text x="32" y="33" 
-        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" 
-        font-weight="900" 
-        font-size="40" 
-        fill="#ffffff" 
-        text-anchor="middle" 
-        dominant-baseline="central">S</text>
+  <!-- Background Squircle (SENAI Red) -->
+  <rect width="100" height="100" rx="22" fill="url(#senaiRed)"/>
+  <!-- Subtle border for high contrast against dark & light browser chrome -->
+  <rect x="2" y="2" width="96" height="96" rx="20" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="2.5"/>
+  <!-- Montserrat 900 (Black) Geometric "S" Path - Scaled to 80% fill -->
+  <g transform="translate(14.1, 88.25) scale(1.0929)">
+    <path d="M31.80 1.60Q23 1.60 14.80-0.40Q6.60-2.40 1.30-5.60L8.90-22.80Q13.90-19.90 20.05-18.15Q26.20-16.40 32-16.40Q35.40-16.40 37.35-16.85Q39.30-17.30 40.20-18.15Q41.10-19 41.10-20.20Q41.10-22.10 39-23.20Q36.90-24.30 33.45-25.05Q30-25.80 25.90-26.65Q21.80-27.50 17.65-28.90Q13.50-30.30 10.05-32.60Q6.60-34.90 4.50-38.65Q2.40-42.40 2.40-48Q2.40-54.50 6.05-59.85Q9.70-65.20 16.95-68.40Q24.20-71.60 35-71.60Q42.10-71.60 49-70.10Q55.90-68.60 61.40-65.50L54.30-48.40Q49.10-51 44.25-52.30Q39.40-53.60 34.80-53.60Q31.40-53.60 29.40-53Q27.40-52.40 26.55-51.40Q25.70-50.40 25.70-49.20Q25.70-47.40 27.80-46.35Q29.90-45.30 33.35-44.60Q36.80-43.90 40.95-43.10Q45.10-42.30 49.20-40.90Q53.30-39.50 56.75-37.20Q60.20-34.90 62.30-31.20Q64.40-27.50 64.40-22Q64.40-15.60 60.75-10.25Q57.10-4.90 49.90-1.65Q42.70 1.60 31.80 1.60" fill="#ffffff"/>
+  </g>
 </svg>
