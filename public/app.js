@@ -276,8 +276,10 @@ function selectCourseUnit(uc) {
     currentCourseData.workload = uc.cargaHoraria || 80;
     currentCourseData.unitSigla = generateSigla(uc.nome);
 
-    // Save official syllabus data from Course Plan PDF
-    currentCourseData.capacidadesTecnicas = uc.capacidadesTecnicas || (uc.detalhes && uc.detalhes.capacidadesTecnicas) || [];
+    // Save official syllabus data from Course Plan PDF (Capacidades Básicas/Técnicas, Socioemocionais e Conhecimentos)
+    const capsTecOuBasicas = uc.capacidadesTecnicas || uc.capacidadesBasicas || (uc.detalhes && (uc.detalhes.capacidadesTecnicas || uc.detalhes.capacidadesBasicas)) || [];
+    currentCourseData.capacidadesTecnicas = capsTecOuBasicas;
+    currentCourseData.capacidadesBasicas = capsTecOuBasicas;
     currentCourseData.capacidadesSocioemocionais = uc.capacidadesSocioemocionais || (uc.detalhes && uc.detalhes.capacidadesSocioemocionais) || [];
     currentCourseData.conhecimentos = uc.conhecimentos || (uc.detalhes && uc.detalhes.conhecimentos) || [];
     currentCourseData.objetivoUC = uc.objetivo || (uc.detalhes && uc.detalhes.objetivo) || currentCourseData.objetivoUC || '';
@@ -1525,13 +1527,16 @@ function renderMSEPViewer() {
                             </tr>
                         </thead>
                         <tbody id="criteria-tbody-${saIdx}">
-                            ${sa.criterios.map((c, cIdx) => `
+                            ${sa.criterios.map((c, cIdx) => {
+                                const capVal = (c.cap && c.cap !== '(Continuação)') ? c.cap : (c.capacidade || c.capacidadeTecnica || c.capacidadeBasica || '');
+                                const critVal = (c.crit && c.crit !== 'undefined') ? c.crit : ((c.criterio && c.criterio !== 'undefined') ? c.criterio : (c.descricao || ''));
+                                return `
                                 <tr id="crit-row-${saIdx}-${cIdx}">
                                     <td>
-                                        <input type="text" class="form-control form-control-sm crit-cap-input" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" value="${c.cap || ''}" placeholder="(Continuação)">
+                                        <input type="text" class="form-control form-control-sm crit-cap-input" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" value="${escapeAttr(capVal)}" placeholder="Capacidade avaliada">
                                     </td>
                                     <td>
-                                        <input type="text" class="form-control form-control-sm crit-text-input" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" value="${c.crit}" style="${c.tipo === 'C' ? 'font-weight: 700;' : ''}">
+                                        <input type="text" class="form-control form-control-sm crit-text-input" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" value="${escapeAttr(critVal)}" style="${c.tipo === 'C' ? 'font-weight: 700;' : ''}" placeholder="Critério de desempenho observável">
                                     </td>
                                     <td style="text-align: center;">
                                         <div class="custom-select-wrap" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" data-selected-val="${c.tipo || 'C'}">
@@ -1554,8 +1559,8 @@ function renderMSEPViewer() {
                                     <td style="text-align: center;">
                                         <button class="btn btn-outline btn-xs btn-delete-crit" data-sa-idx="${saIdx}" data-c-idx="${cIdx}" title="Excluir linha">🗑️</button>
                                     </td>
-                                </tr>
-                            `).join('')}
+                                </tr>`;
+                            }).join('')}
                         </tbody>
                     </table>
                 </div>
@@ -2199,8 +2204,47 @@ function sanitizeUtf8String(str) {
         .replace(/\uFFFD+/g, '');
 }
 
+function escapeAttr(str) {
+    if (!str && str !== 0) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 function sanitizePlanObject(obj) {
     if (!obj || typeof obj !== 'object') return obj;
+
+    // Normaliza e cura critérios nas SAs
+    if (obj.situacoes && Array.isArray(obj.situacoes)) {
+        obj.situacoes.forEach(sa => {
+            if (sa.criterios && Array.isArray(sa.criterios)) {
+                let defaultCap = (sa.capacidadesTecnicas && sa.capacidadesTecnicas[0]) || (sa.capacidadesBasicas && sa.capacidadesBasicas[0]) || (sa.capacidadesSocioemocionais && sa.capacidadesSocioemocionais[0]) || '';
+                let lastValidCap = defaultCap;
+
+                sa.criterios.forEach(c => {
+                    const cCap = (c.cap && c.cap !== '(Continuação)') ? c.cap : (c.capacidade || c.capacidadeTecnica || c.capacidadeBasica || '');
+                    if (cCap && cCap.trim().length > 2) {
+                        lastValidCap = cCap.trim();
+                        c.cap = lastValidCap;
+                    } else if (lastValidCap) {
+                        c.cap = lastValidCap;
+                    }
+
+                    const cCrit = (c.crit && c.crit !== 'undefined') ? c.crit : ((c.criterio && c.criterio !== 'undefined') ? c.criterio : (c.descricao || ''));
+                    if (cCrit && cCrit.trim().length > 2 && cCrit !== 'undefined') {
+                        c.crit = cCrit.trim();
+                    } else if (c.cap) {
+                        c.crit = `Executa procedimentos técnicos e atende aos requisitos de ${c.cap.toLowerCase()}.`;
+                    }
+                    c.tipo = (c.tipo || c.classificacao || 'C').toUpperCase().startsWith('D') ? 'D' : 'C';
+                });
+            }
+        });
+    }
+
     for (const key of Object.keys(obj)) {
         if (typeof obj[key] === 'string') {
             obj[key] = sanitizeUtf8String(obj[key]);

@@ -361,53 +361,107 @@ function extractUcDetailsFromText(fullText, ucName) {
     const endMatch = cleanBlock.match(/(?:Recomendações\s+Metodológicas|Ambiente[s]?\s+Pedagógico|Referências\s+Básicas|INSTALAÇÕES\s+E\s+EQUIPAMENTOS)/i);
     const ucContent = endMatch ? remainder.slice(0, endMatch.index) : remainder;
 
-    // Collect all numbered items (\d+\. Text) and bullet items (• Text)
-    const items = [];
-    const numRe = /(?:^|\s)(\d{1,2}\.(?:\d{1,2}\.?)?)\s+([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][^\n\r]+?)(?=(?:\s+\d{1,2}\.|$|[•·]))/g;
-    let numM;
-    while ((numM = numRe.exec(ucContent)) !== null) {
-        items.push({ num: numM[1], text: numM[2].trim() });
-    }
-
-    const bulletRe = /[•·]\s*([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][^•·\n\r]{6,250})/g;
-    let bM;
-    while ((bM = bulletRe.exec(ucContent)) !== null) {
-        items.push({ num: '•', text: bM[1].trim() });
-    }
-
     const capacidadesTecnicas = [];
     const capacidadesSocioemocionais = [];
     const conhecimentos = [];
 
-    const tecVerbs = /^(?:Identificar|Utilizar|Criar|Representar|Aplicar|Elaborar|Configurar|Normalizar|Documentar|Executar|Analisar|Calcular|Efetuar|Interpretar|Montar|Dimensionar|Definir|Descartar|Realizar|Corrigir|Operar|Estacionar|Manobrar|Movimentar|Distinguir|Carregar|Descarregar|Empilhar|Desempilhar|Apontar|Auxiliar|Controlar|Registrar|Classificar|Programar|Desenvolver|Testar|Implantar|Monitorar|Adequar|Emitir|Verificar|Localizar|Preencher|Instalar|Substituir|Revisar|Planejar|Reconhecer|Projetar|Simular|Inspecionar)\b/i;
+    // 1. Extração estruturada por seções oficiais SENAI (Capacidades Básicas/Técnicas, Socioemocionais e Conhecimentos)
+    const tecMatch = ucContent.match(/Capacidades\s+(?:B[aá]sicas|T[eé]cnicas)([\s\S]*?)(?=Capacidades\s+Socioemocionais|Conhecimentos|CONTEÚDO\s+FORMATIVO|$)/i);
+    const socioMatch = ucContent.match(/Capacidades\s+Socioemocionais([\s\S]*?)(?=Conhecimentos|CONTEÚDO\s+FORMATIVO|Recomendações|Ambiente|$)/i);
+    const conhecMatch = ucContent.match(/(?:Conhecimentos|CONTEÚDO\s+FORMATIVO)([\s\S]*?)(?=Recomendações|Ambiente|Referências|INSTALAÇÕES|$)/i);
 
-    for (const it of items) {
-        const rawText = it.text.replace(/;$/, '').replace(/\s+/g, ' ').trim();
-        if (/^(?:Plano|Página|Módulo|Unidade)/i.test(rawText)) continue;
+    if (tecMatch) {
+        const lines = tecMatch[1].split(/\r?\n/);
+        let cur = '';
+        lines.forEach(l => {
+            const trimmed = l.trim();
+            if (!trimmed || /^(?:Plano|Página|Módulo|Unidade|Competências\s+Específicas)/i.test(trimmed)) return;
+            if (/^\d{1,2}\.\s*/.test(trimmed)) {
+                if (cur && cur.length > 5 && !capacidadesTecnicas.includes(cur)) capacidadesTecnicas.push(cur);
+                cur = trimmed.replace(/^\d{1,2}\.\s*/, '').trim();
+            } else if (trimmed.startsWith('•') || trimmed.startsWith('-')) {
+                if (cur && cur.length > 5 && !capacidadesTecnicas.includes(cur)) capacidadesTecnicas.push(cur);
+                cur = trimmed.replace(/^[•\-]\s*/, '').trim();
+            } else if (cur) {
+                cur += ' ' + trimmed;
+            }
+        });
+        if (cur && cur.length > 5 && !capacidadesTecnicas.includes(cur)) capacidadesTecnicas.push(cur);
+    }
 
-        // Socioemotional
-        if (/^Demonstrar\b/i.test(rawText) || /^Cumprir\s+procedimentos/i.test(rawText) || /^Preservar\b/i.test(rawText) || /^Prevenir\b/i.test(rawText) || /^Compartilhar\s+informa/i.test(rawText) || /^Trabalhar\s+em\s+equipe/i.test(rawText)) {
-            const cleanSoc = rawText.replace(/\s+Conhecimentos.*$/i, '').trim();
-            if (!capacidadesSocioemocionais.includes(cleanSoc)) {
-                capacidadesSocioemocionais.push(cleanSoc);
+    if (socioMatch) {
+        const lines = socioMatch[1].split(/\r?\n/);
+        let cur = '';
+        lines.forEach(l => {
+            const trimmed = l.trim();
+            if (!trimmed || /^(?:Plano|Página|Módulo|Unidade)/i.test(trimmed)) return;
+            if (/^\d{1,2}\.\s*/.test(trimmed)) {
+                if (cur && cur.length > 5 && !capacidadesSocioemocionais.includes(cur)) capacidadesSocioemocionais.push(cur);
+                cur = trimmed.replace(/^\d{1,2}\.\s*/, '').trim();
+            } else if (/^(?:Demonstrar|Cumprir|Preservar|Agir|Prevenir|Compartilhar|Trabalhar)\b/i.test(trimmed)) {
+                if (cur && cur.length > 5 && !capacidadesSocioemocionais.includes(cur)) capacidadesSocioemocionais.push(cur);
+                cur = trimmed;
+            } else if (/^(?:Trabalhar em equipe|Autonomia|Comunicação|Relacionamento|Responsabilidade|Ética|Organização|Criatividade)/i.test(trimmed)) {
+                if (cur && cur.length > 5 && !capacidadesSocioemocionais.includes(cur)) capacidadesSocioemocionais.push(cur);
+                cur = '';
+            } else if (cur) {
+                cur += ' ' + trimmed;
             }
-        }
-        // Technical capability
-        else if (tecVerbs.test(rawText)) {
-            if (rawText.length > 12 && !capacidadesTecnicas.includes(rawText)) {
-                capacidadesTecnicas.push(rawText);
+        });
+        if (cur && cur.length > 5 && !capacidadesSocioemocionais.includes(cur)) capacidadesSocioemocionais.push(cur);
+    }
+
+    if (conhecMatch) {
+        const lines = conhecMatch[1].split(/\r?\n/);
+        lines.forEach(l => {
+            const trimmed = l.trim();
+            if (!trimmed || /^(?:Plano|Página|Módulo|Unidade)/i.test(trimmed)) return;
+            if (/^\d{1,2}(?:\.\d{1,2})*\.?\s+/.test(trimmed) || trimmed.startsWith('•')) {
+                if (!conhecimentos.includes(trimmed)) conhecimentos.push(trimmed);
             }
+        });
+    }
+
+    // 2. Fallback heurístico caso a divisão por seções não tenha encontrado itens
+    if (capacidadesTecnicas.length === 0 || conhecimentos.length === 0) {
+        const items = [];
+        const numRe = /(?:^|\s)(\d{1,2}\.(?:\d{1,2}\.?)?)\s+([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][^\n\r]+?)(?=(?:\s+\d{1,2}\.|$|[•·]))/g;
+        let numM;
+        while ((numM = numRe.exec(ucContent)) !== null) {
+            items.push({ num: numM[1], text: numM[2].trim() });
         }
-        // Knowledge topic
-        else {
-            const conClean = (it.num !== '•' ? it.num + ' ' : '') + rawText;
-            if (rawText.length > 3 && !conhecimentos.includes(conClean)) {
-                conhecimentos.push(conClean);
+
+        const bulletRe = /[•·]\s*([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][^•·\n\r]{6,250})/g;
+        let bM;
+        while ((bM = bulletRe.exec(ucContent)) !== null) {
+            items.push({ num: '•', text: bM[1].trim() });
+        }
+
+        const tecVerbs = /^(?:Identificar|Utilizar|Criar|Representar|Aplicar|Elaborar|Configurar|Normalizar|Documentar|Executar|Analisar|Calcular|Efetuar|Interpretar|Montar|Dimensionar|Definir|Descartar|Realizar|Corrigir|Operar|Estacionar|Manobrar|Movimentar|Distinguir|Carregar|Descarregar|Empilhar|Desempilhar|Apontar|Auxiliar|Controlar|Registrar|Classificar|Programar|Desenvolver|Testar|Implantar|Monitorar|Adequar|Emitir|Verificar|Localizar|Preencher|Instalar|Substituir|Revisar|Planejar|Reconhecer|Projetar|Simular|Inspecionar|Estruturar|Produzir)\b/i;
+
+        for (const it of items) {
+            const rawText = it.text.replace(/;$/, '').replace(/\s+/g, ' ').trim();
+            if (/^(?:Plano|Página|Módulo|Unidade)/i.test(rawText)) continue;
+
+            if (/^Demonstrar\b/i.test(rawText) || /^Cumprir\s+procedimentos/i.test(rawText) || /^Preservar\b/i.test(rawText) || /^Prevenir\b/i.test(rawText) || /^Compartilhar\s+informa/i.test(rawText) || /^Trabalhar\s+em\s+equipe/i.test(rawText)) {
+                const cleanSoc = rawText.replace(/\s+Conhecimentos.*$/i, '').trim();
+                if (!capacidadesSocioemocionais.includes(cleanSoc)) {
+                    capacidadesSocioemocionais.push(cleanSoc);
+                }
+            } else if (tecVerbs.test(rawText)) {
+                if (rawText.length > 8 && !capacidadesTecnicas.includes(rawText)) {
+                    capacidadesTecnicas.push(rawText);
+                }
+            } else {
+                const conClean = (it.num !== '•' ? it.num + ' ' : '') + rawText;
+                if (rawText.length > 3 && !conhecimentos.includes(conClean)) {
+                    conhecimentos.push(conClean);
+                }
             }
         }
     }
 
-    // Default socioemotional if document did not list them separately
+    // Padrão socioemocional caso não venha no PDF
     if (capacidadesSocioemocionais.length === 0) {
         capacidadesSocioemocionais.push('Demonstrar atenção a detalhes e postura profissional.');
         capacidadesSocioemocionais.push('Demonstrar raciocínio lógico e visão sistêmica.');
@@ -417,8 +471,9 @@ function extractUcDetailsFromText(fullText, ucName) {
     return {
         objetivo,
         capacidadesTecnicas,
+        capacidadesBasicas: capacidadesTecnicas,
         capacidadesSocioemocionais,
-        conhecimentos: conhecimentos.slice(0, 30)
+        conhecimentos: conhecimentos.slice(0, 35)
     };
 }
 
@@ -525,6 +580,7 @@ ${cleanSnippet}`;
                         u.detalhes = details;
                         u.objetivo = details.objetivo || '';
                         u.capacidadesTecnicas = details.capacidadesTecnicas || [];
+                        u.capacidadesBasicas = details.capacidadesBasicas || details.capacidadesTecnicas || [];
                         u.capacidadesSocioemocionais = details.capacidadesSocioemocionais || [];
                         u.conhecimentos = details.conhecimentos || [];
                     }

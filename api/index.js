@@ -535,10 +535,13 @@ async function generateWithGemini(courseInfo) {
         ? `Semipresencial (${courseInfo.aulasPresenciais || 0} aulas presenciais e ${courseInfo.aulasEad || 0} aulas EaD / não presenciais)`
         : '100% Presencial';
     let officialCapabilitiesPrompt = '';
-    const hasOfficialCaps = Array.isArray(courseInfo.capacidadesTecnicas) && courseInfo.capacidadesTecnicas.length > 0;
+    const officialCapsList = (Array.isArray(courseInfo.capacidadesTecnicas) && courseInfo.capacidadesTecnicas.length > 0)
+        ? courseInfo.capacidadesTecnicas
+        : (Array.isArray(courseInfo.capacidadesBasicas) && courseInfo.capacidadesBasicas.length > 0 ? courseInfo.capacidadesBasicas : []);
+    const hasOfficialCaps = officialCapsList.length > 0;
     if (hasOfficialCaps) {
-        officialCapabilitiesPrompt += `\n\nATENÇÃO - CAPACIDADES TÉCNICAS OFICIAIS DO PLANO DE CURSO SENAI (OBRIGATÓRIO DISTRIBUIR E USAR ESTAS):
-${courseInfo.capacidadesTecnicas.map((c, i) => `${i + 1}. ${c}`).join('\n')}`;
+        officialCapabilitiesPrompt += `\n\nATENÇÃO - CAPACIDADES BÁSICAS / TÉCNICAS OFICIAIS DO PLANO DE CURSO SENAI (OBRIGATÓRIO DISTRIBUIR E USAR ESTAS):
+${officialCapsList.map((c, i) => `${i + 1}. ${c}`).join('\n')}`;
     }
     if (Array.isArray(courseInfo.capacidadesSocioemocionais) && courseInfo.capacidadesSocioemocionais.length > 0) {
         officialCapabilitiesPrompt += `\n\nCAPACIDADES SOCIOEMOCIONAIS OFICIAIS DO PLANO DE CURSO SENAI:
@@ -546,7 +549,7 @@ ${courseInfo.capacidadesSocioemocionais.map((c, i) => `${i + 1}. ${c}`).join('\n
     }
     if (Array.isArray(courseInfo.conhecimentos) && courseInfo.conhecimentos.length > 0) {
         officialCapabilitiesPrompt += `\n\nCONHECIMENTOS OFICIAIS DO PLANO DE CURSO SENAI:
-${courseInfo.conhecimentos.slice(0, 25).map(c => `- ${c}`).join('\n')}`;
+${courseInfo.conhecimentos.slice(0, 30).map(c => `- ${c}`).join('\n')}`;
     }
 
     const prompt = `Você é um Engenheiro Pedagógico Especialista do SENAI-SP com domínio completo da Metodologia SENAI de Educação Profissional (MSEP), do Book MSEP e do Instrumento de Registro de Resultados da Avaliação com Critérios (IRRAC).
@@ -566,7 +569,7 @@ ${courseInfo.objetivoUC ? `- Objetivo da Unidade Curricular (utilize este exatam
 ${officialCapabilitiesPrompt}
 
 Diretrizes Rigorosas do SENAI MSEP (Diretrizes Oficiais dos Prompts MSEP):
-1. REGRA FUNDAMENTAL: ${hasOfficialCaps ? 'UTILIZE OBRIGATORIAMENTE as Capacidades Técnicas e Socioemocionais Oficiais listadas acima. Distribua todas elas entre as Situações de Aprendizagem.' : 'NUNCA FAÇA ABREVIAÇÕES DE CONTEÚDOS, CAPACIDADES OU CONHECIMENTOS.'} Reescreva a descrição técnica completa de cada capacidade e conhecimento, NUNCA utilize códigos ou siglas como 'K1', 'CT02' ou 'CS3'.
+1. REGRA FUNDAMENTAL: ${hasOfficialCaps ? 'UTILIZE OBRIGATORIAMENTE as Capacidades Básicas, Técnicas e Socioemocionais Oficiais listadas acima. Distribua todas elas entre as Situações de Aprendizagem.' : 'NUNCA FAÇA ABREVIAÇÕES DE CONTEÚDOS, CAPACIDADES OU CONHECIMENTOS.'} Reescreva a descrição técnica completa de cada capacidade e conhecimento, NUNCA utilize códigos ou siglas como 'K1', 'CT02' ou 'CS3'.
 2. Determine a quantidade adequada de Situações de Aprendizagem (SAs) para a carga horária (ex: 20h = 1 SA; 40-60h = 2 SAs; 80-100h = 3 SAs; 120-200h = 4 SAs).
 3. A soma exata do campo 'aulas' de todas as SAs DEVE SER EXATAMENTE IGUAL a ${totalHours} horas.
 4. Para cada SA:
@@ -574,21 +577,26 @@ Diretrizes Rigorosas do SENAI MSEP (Diretrizes Oficiais dos Prompts MSEP):
    - 'titulo': Título prático e estimulante contextualizado no mercado de trabalho industrial focado na Unidade Curricular "${courseUnit}".
    - 'aulas': Quantidade de horas (inteiro).
    - 'estrategiaTipo': 'Situação-problema', 'Projeto', 'Estudo de caso' ou 'Pesquisa aplicada' (conforme sugerido no Book MSEP).
-   - 'capacidadesTecnicas': Array com as capacidades técnicas oficiais atribuídas a esta SA.
-   - 'capacidadesSocioemocionais': Array com 1 a 3 capacidades (ex: 'Demonstrar raciocínio lógico.', 'Demonstrar atenção a detalhes.', 'Demonstrar responsabilidade.').
+   - 'capacidadesTecnicas': Array com as capacidades básicas ou técnicas oficiais atribuídas a esta SA.
+   - 'capacidadesSocioemocionais': Array com 1 a 3 capacidades socioemocionais (ex: 'Demonstrar assertividade na comunicação.', 'Demonstrar escuta ativa.', 'Demonstrar iniciativa.').
    - 'conhecimentos': Array com tópicos de conhecimentos técnicos pertinentes (redação completa).
    - 'contextualizacao': Narrativa imersiva de uma empresa ou cenário industrial real com um problema a ser resolvido.
    - 'observacoesDocente': Instruções e dicas pedagógicas para a condução do professor (foco, mediação, segurança).
    - 'desafio': O desafio prático que os alunos devem solucionar.
    - 'resultadosEsperados': Entregas tangíveis esperadas dos alunos (produtos, relatórios, protótipos).
-   - 'estrategiasEnsino': Métodos didáticos (ex: 'Projeto prático em bancada; Trabalho em equipe; Resolução colaborativa').
+   - 'estrategiasEnsino': Métodos didáticos estruturados (ex: '1. Contextualização; 2. Planejamento; 3. Execução; 4. Avaliação; 5. Fechamento').
    - 'instrumentosAvaliacao': Instrumentos avaliativos (ex: 'Avaliação prática de desempenho; Relatório técnico; Checklist').
    - 'recursos': Máquinas, bancadas didáticas, ferramentas, instrumentos ou softwares específicos da área.
-   - 'criterios': Array de objetos com critérios de avaliação observáveis redigidos rigorosamente no PRESENTE DO INDICATIVO:
-       - Para CADA capacidade técnica da SA, formule rigorosamente dois critérios observáveis no presente do indicativo:
-         1. Critério Crítico (C): Desempenho técnico essencial e inegociável da capacidade (inicie com o verbo no presente e marque com tipo "C").
-         2. Critério Desejável (D): Padrão de qualidade, acabamento, eficiência ou boas práticas (marque com tipo "D").
-       - Formule critérios para as capacidades socioemocionais (tipo "C" e "D"). Balanceie entre C e D.
+   - 'criterios': Array de objetos com os critérios de avaliação (IRRAC).
+     Para CADA capacidade técnica ou básica desta SA:
+       - Formule 1 Critério Crítico (tipo "C"): Desempenho técnico essencial e inegociável da capacidade, iniciado com verbo no presente do indicativo.
+       - Formule 1 Critério Desejável (tipo "D"): Padrão de qualidade, acabamento, eficiência ou boas práticas, iniciado com verbo no presente do indicativo.
+     Para CADA capacidade socioemocional desta SA:
+       - Formule critérios com verbos no presente do indicativo (balanceando tipo "C" e "D").
+     IMPORTANTE: Em CADA objeto do array 'criterios', preencha OBRIGATORIAMENTE:
+       - 'cap': Nome completo da capacidade avaliada (NUNCA deixe vazio nem coloque abreviação).
+       - 'crit': Redação completa do critério observável formulado no presente do indicativo (NUNCA deixe vazio ou undefined).
+       - 'tipo': "C" ou "D".
 
 Retorne APENAS um JSON no seguinte formato:
 {
@@ -605,7 +613,41 @@ Retorne APENAS um JSON no seguinte formato:
   "semAno": "${courseInfo.semAno || '2º Sem/2026'}",
   "escola": "${courseInfo.escola || 'Escola SENAI'}",
   "objetivoUC": "${courseInfo.objetivoUC || 'Desenvolver as competências técnicas e socioemocionais preconizadas na matriz curricular.'}",
-  "situacoes": [ ... ]
+  "situacoes": [
+    {
+      "numero": "01",
+      "titulo": "Título da Situação de Aprendizagem",
+      "aulas": ${Math.floor(totalHours / 2)},
+      "estrategiaTipo": "Situação-problema",
+      "capacidadesTecnicas": [ "Nome da capacidade técnica ou básica" ],
+      "capacidadesSocioemocionais": [ "Demonstrar assertividade na comunicação" ],
+      "conhecimentos": [ "Tópicos de conhecimentos pertinentes" ],
+      "contextualizacao": "Cenário industrial...",
+      "observacoesDocente": "Instruções docentes...",
+      "desafio": "Desafio a ser resolvido...",
+      "resultadosEsperados": "Entregas...",
+      "estrategiasEnsino": "Metodologia MSEP em 5 colunas...",
+      "instrumentosAvaliacao": "Instrumentos avaliativos...",
+      "recursos": "Recursos...",
+      "criterios": [
+        {
+          "cap": "Nome completo da capacidade básica ou técnica avaliada",
+          "crit": "Verbo no presente do indicativo descrevendo o critério observável",
+          "tipo": "C"
+        },
+        {
+          "cap": "Nome completo da capacidade básica ou técnica avaliada",
+          "crit": "Verbo no presente do indicativo descrevendo padrão de qualidade e acabamento",
+          "tipo": "D"
+        },
+        {
+          "cap": "Demonstrar assertividade na comunicação",
+          "crit": "Demonstra assertividade ao expor ideias e esclarecer dúvidas com clareza",
+          "tipo": "C"
+        }
+      ]
+    }
+  ]
 }`;
 
     const candidateModels = ["gemini-3.8-flash", "gemini-4-argon", "gemini-3.5-flash-lite", "gemini-2.5-flash"];
@@ -682,8 +724,25 @@ function callGemini(apiKey, prompt, modelName) {
                         if (plan.situacoes && Array.isArray(plan.situacoes)) {
                             plan.situacoes.forEach(sa => {
                                 if (sa.criterios && Array.isArray(sa.criterios)) {
+                                    // 1. Normalização de campos
                                     sa.criterios.forEach(c => {
                                         c.row = globalRow++;
+                                        c.cap = (c.cap || c.capacidade || c.capacidadeTecnica || c.capacidadeBasica || c.habilidade || '').trim();
+                                        c.crit = (c.crit || c.criterio || c.criterioDesempenho || c.descricao || c.texto || '').trim();
+                                        c.tipo = (c.tipo || c.classificacao || 'C').toUpperCase().startsWith('D') ? 'D' : 'C';
+                                    });
+
+                                    // 2. Garantir que todo critério tenha o nome completo da capacidade (sem deixar vazio ou "Continuação")
+                                    let currentCap = (sa.capacidadesTecnicas && sa.capacidadesTecnicas[0]) || (sa.capacidadesBasicas && sa.capacidadesBasicas[0]) || (sa.capacidadesSocioemocionais && sa.capacidadesSocioemocionais[0]) || 'Capacidade da Unidade Curricular';
+                                    sa.criterios.forEach(c => {
+                                        if (c.cap && c.cap.length > 2 && c.cap !== '(Continuação)') {
+                                            currentCap = c.cap;
+                                        } else {
+                                            c.cap = currentCap;
+                                        }
+                                        if (!c.crit || c.crit === 'undefined' || c.crit.length < 3) {
+                                            c.crit = `Executa procedimentos técnicos e atende aos requisitos de ${c.cap.toLowerCase()}.`;
+                                        }
                                     });
                                 }
                                 globalRow++;
@@ -998,7 +1057,9 @@ function buildGenericDynamicPlan(courseInfo) {
     };
 
     const cfg = domainConfigs[domain] || domainConfigs.general;
-    const capsTec = courseInfo.capacidadesTecnicas && courseInfo.capacidadesTecnicas.length > 0 ? courseInfo.capacidadesTecnicas : cfg.caps;
+    const capsTec = (courseInfo.capacidadesTecnicas && courseInfo.capacidadesTecnicas.length > 0)
+        ? courseInfo.capacidadesTecnicas
+        : ((courseInfo.capacidadesBasicas && courseInfo.capacidadesBasicas.length > 0) ? courseInfo.capacidadesBasicas : cfg.caps);
     const capsSocio = courseInfo.capacidadesSocioemocionais && courseInfo.capacidadesSocioemocionais.length > 0 ? courseInfo.capacidadesSocioemocionais : cfg.socio;
 
     let numSAs = 2;
@@ -1033,7 +1094,7 @@ function buildGenericDynamicPlan(courseInfo) {
             });
             saCriterios.push({
                 row: currentRow++,
-                cap: "",
+                cap: capText,
                 crit: desejavel,
                 tipo: "D"
             });
@@ -1049,7 +1110,7 @@ function buildGenericDynamicPlan(courseInfo) {
         });
         saCriterios.push({
             row: currentRow++,
-            cap: "",
+            cap: socioCap,
             crit: `Trabalha de forma colaborativa com a equipe, cumprindo normas de convivência e prazos estabelecidos.`,
             tipo: "D"
         });
@@ -1601,3 +1662,6 @@ module.exports = async (req, res) => {
     res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ error: 'Route not found', requestedRoute: routeParam || rawPath }));
 };
+
+module.exports.generateMSEPPlan = generateMSEPPlan;
+
