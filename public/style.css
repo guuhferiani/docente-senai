@@ -1389,6 +1389,13 @@ select.form-control:focus, .crit-tipo-select:focus {
     border: 1px solid var(--primary-border);
 }
 
+.docx-icon {
+    background: #eff6ff;
+    color: #185abd;
+    border: 1px solid #bfdbfe;
+}
+
+
 .export-card h3 {
     font-size: 1.25rem;
     font-weight: 800;
@@ -1505,6 +1512,26 @@ select.form-control:focus, .crit-tipo-select:focus {
     box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
     transform: translateY(-1px);
 }
+
+/* Word & Google Docs Button (Word Blue) */
+.btn-docx {
+    background: #185abd;
+    color: #ffffff;
+    box-shadow: 0 1px 2px rgba(24, 90, 189, 0.25);
+}
+
+.btn-docx:hover {
+    background: #104a9e;
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(24, 90, 189, 0.35);
+    transform: translateY(-1px);
+}
+
+.btn-docx:active {
+    background: #0c3875;
+    transform: translateY(0);
+}
+
 
 /* Danger Button */
 .btn-danger {

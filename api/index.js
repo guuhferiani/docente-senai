@@ -608,7 +608,7 @@ Retorne APENAS um JSON no seguinte formato:
   "situacoes": [ ... ]
 }`;
 
-    const candidateModels = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"];
+    const candidateModels = ["gemini-3.8-flash", "gemini-4-argon", "gemini-3.5-flash-lite", "gemini-2.5-flash"];
 
     for (const modelName of candidateModels) {
         const plan = await callGemini(apiKey, prompt, modelName);
@@ -724,12 +724,14 @@ async function testGeminiConnection(keyToTest) {
         return { success: false, error: 'Chave de API não informada ou inválida.' };
     }
 
-    const testModels = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-flash-latest"];
+    const testModels = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-4-argon", "gemini-2.5-flash"];
+    let lastError = '';
     for (const m of testModels) {
         const res = await runGeminiPing(apiKey, m);
         if (res.success) return res;
+        lastError = res.error || lastError;
     }
-    return { success: false, error: 'Não foi possível conectar a nenhum modelo do Google Gemini.' };
+    return { success: false, error: lastError || 'Não foi possível conectar a nenhum modelo do Google Gemini.' };
 }
 
 function runGeminiPing(apiKey, modelName) {
@@ -1479,7 +1481,7 @@ module.exports = async (req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({
             geminiConfigured: hasEnvKey,
-            model: 'gemini-3.5-flash-lite',
+            model: 'gemini-3.8-flash',
             provider: 'Google Gemini'
         }));
         return;

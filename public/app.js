@@ -1381,7 +1381,7 @@ async function handleGenerateMSEP() {
 
     const ucName = currentCourseData.courseUnit || currentCourseData.courseName;
     showLoading({
-        badge: 'Google Gemini 2.5 Flash',
+        badge: 'Google Gemini 3.8 Flash',
         title: 'Gerando Plano de Ensino MSEP com IA...',
         message: `Construindo Situações de Aprendizagem, desafios e critérios de avaliação para "${ucName}"...`,
         stages: [

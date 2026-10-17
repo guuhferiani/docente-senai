@@ -464,7 +464,7 @@ Retorne APENAS um JSON válido no formato:
 Texto do Plano de Curso:
 ${cleanSnippet}`;
 
-    const candidateModels = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"];
+    const candidateModels = ["gemini-3.8-flash", "gemini-4-argon", "gemini-3.5-flash-lite", "gemini-2.5-flash"];
     
     for (const modelName of candidateModels) {
         try {
