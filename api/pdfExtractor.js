@@ -260,6 +260,7 @@ function parseCoursePlanHeuristic(text, fileName = '') {
             u.detalhes = details;
             u.objetivo = details.objetivo || '';
             u.capacidadesTecnicas = details.capacidadesTecnicas || [];
+            u.capacidadesBasicas = details.capacidadesBasicas || details.capacidadesTecnicas || [];
             u.capacidadesSocioemocionais = details.capacidadesSocioemocionais || [];
             u.conhecimentos = details.conhecimentos || [];
         }
@@ -365,10 +366,10 @@ function extractUcDetailsFromText(fullText, ucName) {
     const capacidadesSocioemocionais = [];
     const conhecimentos = [];
 
-    // 1. Extração estruturada por seções oficiais SENAI (Capacidades Básicas/Técnicas, Socioemocionais e Conhecimentos)
-    const tecMatch = ucContent.match(/Capacidades\s+(?:B[aá]sicas|T[eé]cnicas)([\s\S]*?)(?=Capacidades\s+Socioemocionais|Conhecimentos|CONTEÚDO\s+FORMATIVO|$)/i);
-    const socioMatch = ucContent.match(/Capacidades\s+Socioemocionais([\s\S]*?)(?=Conhecimentos|CONTEÚDO\s+FORMATIVO|Recomendações|Ambiente|$)/i);
-    const conhecMatch = ucContent.match(/(?:Conhecimentos|CONTEÚDO\s+FORMATIVO)([\s\S]*?)(?=Recomendações|Ambiente|Referências|INSTALAÇÕES|$)/i);
+    // 1. Extração estruturada por seções oficiais SENAI (Capacidades Básicas/Técnicas/Profissionais, Socioemocionais e Conhecimentos)
+    const tecMatch = ucContent.match(/(?:Capacidades|Competências)\s+(?:B[aá]sicas|T[eé]cnicas|Profissionais|Espec[ií]ficas)([\s\S]*?)(?=Capacidades\s+(?:Socioemocionais|Sociais)|Conhecimentos|CONTEÚDO\s+FORMATIVO|Bases\s+Tecnol[oó]gicas|$)/i);
+    const socioMatch = ucContent.match(/Capacidades\s+(?:Socioemocionais|Sociais(?:,\s*Organizativas)?(?:\s*e\s*Metodol[oó]gicas)?)([\s\S]*?)(?=Conhecimentos|CONTEÚDO\s+FORMATIVO|Bases\s+Tecnol[oó]gicas|Recomendações|Ambiente|$)/i);
+    const conhecMatch = ucContent.match(/(?:Conhecimentos|CONTEÚDO\s+FORMATIVO|Bases\s+Tecnol[oó]gicas)([\s\S]*?)(?=Recomendações|Ambiente|Referências|INSTALAÇÕES|$)/i);
 
     if (tecMatch) {
         const lines = tecMatch[1].split(/\r?\n/);
@@ -437,7 +438,7 @@ function extractUcDetailsFromText(fullText, ucName) {
             items.push({ num: '•', text: bM[1].trim() });
         }
 
-        const tecVerbs = /^(?:Identificar|Utilizar|Criar|Representar|Aplicar|Elaborar|Configurar|Normalizar|Documentar|Executar|Analisar|Calcular|Efetuar|Interpretar|Montar|Dimensionar|Definir|Descartar|Realizar|Corrigir|Operar|Estacionar|Manobrar|Movimentar|Distinguir|Carregar|Descarregar|Empilhar|Desempilhar|Apontar|Auxiliar|Controlar|Registrar|Classificar|Programar|Desenvolver|Testar|Implantar|Monitorar|Adequar|Emitir|Verificar|Localizar|Preencher|Instalar|Substituir|Revisar|Planejar|Reconhecer|Projetar|Simular|Inspecionar|Estruturar|Produzir)\b/i;
+        const tecVerbs = /^(?:Identificar|Utilizar|Criar|Representar|Aplicar|Elaborar|Configurar|Normalizar|Documentar|Executar|Analisar|Calcular|Efetuar|Interpretar|Montar|Dimensionar|Definir|Descartar|Realizar|Corrigir|Operar|Estacionar|Manobrar|Movimentar|Distinguir|Carregar|Descarregar|Empilhar|Desempilhar|Apontar|Auxiliar|Controlar|Registrar|Classificar|Programar|Desenvolver|Testar|Implantar|Monitorar|Adequar|Emitir|Verificar|Localizar|Preencher|Instalar|Substituir|Revisar|Planejar|Reconhecer|Projetar|Simular|Inspecionar|Estruturar|Produzir|Avaliar|Selecionar|Manipular|Diagnosticar|Medir|Aferir|Parametrizar|Codificar|Integrar|Ajustar|Manter|Sintetizar|Construir|Modelar|Mapear)\b/i;
 
         for (const it of items) {
             const rawText = it.text.replace(/;$/, '').replace(/\s+/g, ' ').trim();
