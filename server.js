@@ -49,7 +49,11 @@ const server = http.createServer((req, res) => {
     }
 
     // Static file serving for local server
-    let safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
+    let decodedPath = pathname;
+    try {
+        decodedPath = decodeURIComponent(pathname);
+    } catch (e) {}
+    let safePath = path.normalize(decodedPath).replace(/^(\.\.[\/\\])+/, '');
     if (safePath === '/' || safePath === '\\') safePath = '/index.html';
     
     const filePath = path.join(PUBLIC_DIR, safePath);

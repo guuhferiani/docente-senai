@@ -1830,6 +1830,9 @@ function renderExportAndDocView() {
 
     let docHTML = `
         <div class="senai-doc-header">
+            <div class="senai-doc-logo-container">
+                <img src="senai-logo.png" alt="SENAI São Paulo" class="senai-doc-logo">
+            </div>
             <h1>${currentMsepPlan.escola}</h1>
             <h2>PLANO DE ENSINO</h2>
             <div class="senai-banner-black">SITUAÇÃO DE APRENDIZAGEM</div>

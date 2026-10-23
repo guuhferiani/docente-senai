@@ -1213,13 +1213,18 @@ function compileIRRACXlsx(courseData) {
     const stringList = [];
     const sstMatches = sstRaw.matchAll(/<si>(.*?)<\/si>/gs);
     for (const m of sstMatches) {
+        let val = '';
         const tMatch = m[1].match(/<t[^>]*>(.*?)<\/t>/s);
         if (tMatch) {
-            stringList.push(tMatch[1]);
+            val = tMatch[1];
         } else {
             const rMatches = [...m[1].matchAll(/<t[^>]*>(.*?)<\/t>/gs)];
-            stringList.push(rMatches.map(r => r[1]).join(''));
+            val = rMatches.map(r => r[1]).join('');
         }
+        if (val.includes('Welson')) {
+            val = '© SENAI-SP - Todos os direitos reservados.';
+        }
+        stringList.push(val);
     }
 
     function getOrAddString(str) {

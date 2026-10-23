@@ -126,18 +126,35 @@ img, svg {
     gap: 1.25rem;
 }
 
-.senai-logo-badge {
-    background: var(--primary);
-    color: #ffffff;
-    font-weight: 900;
-    font-size: 1.15rem;
-    letter-spacing: 2px;
-    padding: 0.4rem 0.95rem;
-    border-radius: var(--radius-sm);
-    box-shadow: 0 2px 4px rgba(227, 6, 19, 0.2);
+.brand-logo-wrapper {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
+    text-decoration: none;
+    flex-shrink: 0;
+}
+
+.senai-official-logo {
+    height: 38px;
+    width: auto;
+    max-width: 165px;
+    object-fit: contain;
+    display: block;
+    transition: transform var(--transition-fast), filter var(--transition-fast);
+}
+
+.brand-logo-wrapper:hover .senai-official-logo {
+    transform: translateY(-1px) scale(1.02);
+}
+
+.brand-divider {
+    width: 1px;
+    height: 32px;
+    background: var(--border-color);
+    flex-shrink: 0;
+}
+
+.senai-logo-badge {
+    display: none;
 }
 
 .brand-text h1 {
@@ -1766,6 +1783,19 @@ select.form-control:focus, .crit-tipo-select:focus {
     margin-bottom: 1.5rem;
 }
 
+.senai-doc-logo-container {
+    text-align: center;
+    margin-bottom: 0.65rem;
+}
+
+.senai-doc-logo {
+    height: 42px;
+    width: auto;
+    max-width: 190px;
+    object-fit: contain;
+    display: inline-block;
+}
+
 .senai-doc-header h1 {
     font-size: 14pt;
     font-weight: bold;
@@ -2454,9 +2484,13 @@ select.form-control:focus, .crit-tipo-select:focus {
         font-size: 1rem;
     }
 
-    .senai-logo-badge {
-        font-size: 0.95rem;
-        padding: 0.3rem 0.65rem;
+    .senai-official-logo {
+        height: 28px;
+        max-width: 120px;
+    }
+
+    .brand-divider {
+        height: 24px;
     }
 
     .header-actions .btn-sm,
