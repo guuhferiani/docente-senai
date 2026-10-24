@@ -1472,7 +1472,7 @@ function renderMSEPViewer() {
             <div class="sa-card-header">
                 <div class="sa-title-wrap">
                     <span class="sa-badge">SA ${sa.numero}</span>
-                    <input type="text" class="form-control sa-title-input" data-sa-idx="${saIdx}" value="${sa.titulo}" style="font-weight: 700; font-size: 1.05rem;">
+                    <input type="text" class="form-control sa-title-input" data-sa-idx="${saIdx}" value="${escapeAttr(cleanSaTitle(sa.titulo))}" style="font-weight: 700; font-size: 1.05rem;">
                 </div>
                 <div class="sa-header-controls">
                     <div class="sa-hours-box">
@@ -1645,7 +1645,7 @@ function attachDynamicMSEPHandlers() {
             const sa = currentMsepPlan.situacoes[saIdx];
             openModal({
                 title: `Excluir Situação de Aprendizagem ${sa.numero}?`,
-                desc: `Tem certeza que deseja remover "${sa.titulo}" e seus critérios de avaliação?`,
+                desc: `Tem certeza que deseja remover "${cleanSaTitle(sa.titulo) || `SA ${sa.numero}`}" e seus critérios de avaliação?`,
                 confirmText: 'Excluir SA',
                 cancelText: 'Cancelar',
                 iconType: 'danger',
@@ -1709,7 +1709,7 @@ function handleAddNewSA() {
     const newNum = String(currentMsepPlan.situacoes.length + 1).padStart(2, '0');
     currentMsepPlan.situacoes.push({
         numero: newNum,
-        titulo: `Situação de Aprendizagem ${newNum} - Projeto Prático Aplicado`,
+        titulo: "Projeto Prático Aplicado",
         aulas: 10,
         estrategiaTipo: "Projeto",
         capacidadesTecnicas: ["Executar rotinas e procedimentos técnicos da especialidade."],
@@ -1756,7 +1756,7 @@ function syncMsepPlanFromUI() {
 
     currentMsepPlan.situacoes.forEach((sa, saIdx) => {
         const titleInp = document.querySelector(`.sa-title-input[data-sa-idx="${saIdx}"]`);
-        if (titleInp) sa.titulo = titleInp.value;
+        if (titleInp) sa.titulo = cleanSaTitle(titleInp.value);
 
         const hoursInp = document.querySelector(`.sa-hours-input[data-sa-idx="${saIdx}"]`);
         if (hoursInp) sa.aulas = parseInt(hoursInp.value) || 0;
@@ -1865,9 +1865,11 @@ function renderExportAndDocView() {
 
     currentMsepPlan.situacoes.forEach((sa, idx) => {
         const capListAll = [...(sa.capacidadesTecnicas || []), ...(sa.capacidadesSocioemocionais || [])];
+        const saCleanTitle = cleanSaTitle(sa.titulo);
+        const titleSuffix = saCleanTitle ? ` - ${saCleanTitle}` : '';
         docHTML += `
             <div class="${idx > 0 ? 'print-page-break' : ''}">
-                <div class="doc-sa-title">SITUAÇÃO DE APRENDIZAGEM ${sa.numero} - ${sa.titulo}</div>
+                <div class="doc-sa-title">SITUAÇÃO DE APRENDIZAGEM ${sa.numero}${titleSuffix}</div>
                 
                 <table class="senai-table-doc">
                     <tr>
@@ -2199,6 +2201,17 @@ function saveToLocalStorage() {
     }
 }
 
+// Strips redundant prefixes like "Situação de Aprendizagem 01 -", "SA 01:", "Bloco 1 -"
+function cleanSaTitle(rawTitle) {
+    if (!rawTitle) return '';
+    let title = String(rawTitle).trim();
+    const prefixRegex = /^(?:situaç[ãa]o\s+de\s+aprendizagem|sa|bloco)\s*\d*\s*[-–:]*\s*/i;
+    while (prefixRegex.test(title)) {
+        title = title.replace(prefixRegex, '').trim();
+    }
+    return title;
+}
+
 // Auto-heals corrupted UTF-8 split character artifacts (such as \uFFFD from former stream chunk splitting)
 function sanitizeUtf8String(str) {
     if (!str || typeof str !== 'string') return str;
@@ -2220,9 +2233,15 @@ function escapeAttr(str) {
 function sanitizePlanObject(obj) {
     if (!obj || typeof obj !== 'object') return obj;
 
-    // Normaliza e cura critérios nas SAs
+    // Normaliza e cura títulos e critérios nas SAs
     if (obj.situacoes && Array.isArray(obj.situacoes)) {
         obj.situacoes.forEach(sa => {
+            if (sa.titulo) {
+                sa.titulo = cleanSaTitle(sa.titulo);
+            }
+            if (sa.contextualizacaoTitulo) {
+                sa.contextualizacaoTitulo = cleanSaTitle(sa.contextualizacaoTitulo);
+            }
             if (sa.criterios && Array.isArray(sa.criterios)) {
                 let defaultCap = (sa.capacidadesTecnicas && sa.capacidadesTecnicas[0]) || (sa.capacidadesBasicas && sa.capacidadesBasicas[0]) || (sa.capacidadesSocioemocionais && sa.capacidadesSocioemocionais[0]) || '';
                 let lastValidCap = defaultCap;

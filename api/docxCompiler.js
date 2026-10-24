@@ -17,6 +17,16 @@ function escapeXml(str) {
         .replace(/'/g, '&apos;');
 }
 
+function cleanSaTitle(rawTitle) {
+    if (!rawTitle) return '';
+    let title = String(rawTitle).trim();
+    const prefixRegex = /^(?:situaç[ãa]o\s+de\s+aprendizagem|sa|bloco)\s*\d*\s*[-–:]*\s*/i;
+    while (prefixRegex.test(title)) {
+        title = title.replace(prefixRegex, '').trim();
+    }
+    return title;
+}
+
 /**
  * Calcula os 10 níveis oficiais de desempenho (10 a 1) e notas (100 a 10)
  * de acordo com a diretriz do SENAI-SP (Prompt 07 e documentos de referência).
@@ -101,7 +111,11 @@ function compilePlanoDocx(plan, templatePath) {
     const zip = new AdmZip(resolvedPath);
     let xml = zip.readAsText('word/document.xml');
 
-    const situacoes = plan.situacoes || [];
+    const situacoes = (plan.situacoes || []).map(sa => ({
+        ...sa,
+        titulo: cleanSaTitle(sa.titulo),
+        contextualizacaoTitulo: cleanSaTitle(sa.contextualizacaoTitulo)
+    }));
     const sa1 = situacoes[0] || {};
     const sa2 = situacoes[1] || null;
     const sa3 = situacoes[2] || null;

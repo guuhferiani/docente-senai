@@ -10,6 +10,16 @@ function getDefaultDuration(tipo) {
     return (tipo === 'tecnico') ? 45 : 60;
 }
 
+function cleanSaTitle(rawTitle) {
+    if (!rawTitle) return '';
+    let title = String(rawTitle).trim();
+    const prefixRegex = /^(?:situaç[ãa]o\s+de\s+aprendizagem|sa|bloco)\s*\d*\s*[-–:]*\s*/i;
+    while (prefixRegex.test(title)) {
+        title = title.replace(prefixRegex, '').trim();
+    }
+    return title;
+}
+
 // Load environment variables from .env if present (Local / Self-hosted)
 try {
     const envPath = path.resolve(__dirname, '..', '.env');
@@ -574,7 +584,7 @@ Diretrizes Rigorosas do SENAI MSEP (Diretrizes Oficiais dos Prompts MSEP):
 3. A soma exata do campo 'aulas' de todas as SAs DEVE SER EXATAMENTE IGUAL a ${totalHours} horas.
 4. Para cada SA:
    - 'numero': "01", "02", etc.
-   - 'titulo': Título prático e estimulante contextualizado no mercado de trabalho industrial focado na Unidade Curricular "${courseUnit}".
+   - 'titulo': Título temático da Situação de Aprendizagem (ex: "Fundamentação e Planejamento Técnico", NUNCA repita prefixos como "SA 01", "Situação de Aprendizagem 01" ou "Bloco 1").
    - 'aulas': Quantidade de horas (inteiro).
    - 'estrategiaTipo': 'Situação-problema', 'Projeto', 'Estudo de caso' ou 'Pesquisa aplicada' (conforme sugerido no Book MSEP).
    - 'capacidadesTecnicas': Array com as capacidades básicas ou técnicas oficiais atribuídas a esta SA.
@@ -723,6 +733,8 @@ function callGemini(apiKey, prompt, modelName) {
                         let globalRow = 15;
                         if (plan.situacoes && Array.isArray(plan.situacoes)) {
                             plan.situacoes.forEach(sa => {
+                                if (sa.titulo) sa.titulo = cleanSaTitle(sa.titulo);
+                                if (sa.contextualizacaoTitulo) sa.contextualizacaoTitulo = cleanSaTitle(sa.contextualizacaoTitulo);
                                 if (sa.criterios && Array.isArray(sa.criterios)) {
                                     // 1. Normalização de campos
                                     sa.criterios.forEach(c => {
@@ -1126,7 +1138,7 @@ function buildGenericDynamicPlan(courseInfo) {
 
         situacoes.push({
             numero: saNum,
-            titulo: `Situação de Aprendizagem ${saNum} - ${i === 1 ? 'Fundamentação e Planejamento' : (i === numSAs ? 'Integração Final e Validação Técnica' : 'Desenvolvimento Prático')} de ${courseUnit}`,
+            titulo: `${i === 1 ? 'Fundamentação e Planejamento' : (i === numSAs ? 'Integração Final e Validação Técnica' : 'Desenvolvimento Prático')} de ${courseUnit}`,
             aulas: hoursForSA,
             estrategiaTipo: (i === 1) ? "Situação-problema" : (i === numSAs ? "Estudo de caso / Projeto Integrador" : "Projeto"),
             capacidadesTecnicas: assignedCaps,
