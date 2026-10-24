@@ -6,14 +6,47 @@ const https = require('https');
  * Decompresses FlateDecode streams, parses ToUnicode CMaps (UCS-2/UTF-16BE hex strings),
  * and handles standard literal text streams.
  */
+function parseCMapStream(streamStr) {
+    const cmap = new Map();
+    const bfcharBlocks = streamStr.matchAll(/(\d+)\s+beginbfchar\s*(.*?)\s*endbfchar/gs);
+    for (const b of bfcharBlocks) {
+        const pairs = b[2].matchAll(/<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>/g);
+        for (const p of pairs) cmap.set(parseInt(p[1], 16), String.fromCharCode(parseInt(p[2], 16)));
+    }
+    const bfrangeBlocks = streamStr.matchAll(/(\d+)\s+beginbfrange\s*(.*?)\s*endbfrange/gs);
+    for (const b of bfrangeBlocks) {
+        const arrRanges = b[2].matchAll(/<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>\s*\[(.*?)\]/gs);
+        for (const ar of arrRanges) {
+            const start = parseInt(ar[1], 16);
+            const dsts = [...ar[3].matchAll(/<([0-9a-fA-F]+)>/g)].map(x => String.fromCharCode(parseInt(x[1], 16)));
+            for (let i = 0; i < dsts.length; i++) cmap.set(start + i, dsts[i]);
+        }
+        const cleanBlock = b[2].replace(/<[0-9a-fA-F]+>\s+<[0-9a-fA-F]+>\s*\[.*?\]/gs, '');
+        const simpleRanges = cleanBlock.matchAll(/<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>/g);
+        for (const sr of simpleRanges) {
+            const start = parseInt(sr[1], 16);
+            const end = parseInt(sr[2], 16);
+            const base = parseInt(sr[3], 16);
+            for (let c = start; c <= end; c++) cmap.set(c, String.fromCharCode(base + (c - start)));
+        }
+    }
+    return cmap;
+}
+
+/**
+ * Pure Node.js in-memory robust PDF text extractor
+ * Parses per-font Adobe Identity / ToUnicode CMaps, tracks text baseline coordinates
+ * to properly format lines, and avoids character-level space splitting.
+ */
 function extractPdfText(buffer) {
     if (!buffer || !Buffer.isBuffer(buffer)) return '';
+    const str = buffer.toString('latin1');
     let cursor = 0;
-    let streams = [];
+    const streams = [];
     while (true) {
-        const streamIdx = buffer.indexOf('stream', cursor);
-        if (streamIdx === -1) break;
-        let start = streamIdx + 6;
+        const sIdx = buffer.indexOf('stream', cursor);
+        if (sIdx === -1) break;
+        let start = sIdx + 6;
         if (buffer[start] === 0x0d && buffer[start + 1] === 0x0a) start += 2;
         else if (buffer[start] === 0x0a) start += 1;
         const end = buffer.indexOf('endstream', start);
@@ -25,91 +58,125 @@ function extractPdfText(buffer) {
         cursor = end + 9;
     }
 
-    // 1. Parse Adobe Identity / ToUnicode CMaps
-    let cmap = new Map();
+    // 1. Map all /Font objects to their /ToUnicode CMap object ID
+    const fontToUnicodeMap = {};
+    const fontObjRegex = /(\d+)\s+0\s+obj[\s\S]*?\/Type\s*\/Font\b[\s\S]*?endobj/g;
+    let fo;
+    while ((fo = fontObjRegex.exec(str)) !== null) {
+        const fontId = fo[1];
+        const toUni = fo[0].match(/\/ToUnicode\s+(\d+)\s+0\s+R/);
+        if (toUni) fontToUnicodeMap[fontId] = parseInt(toUni[1]);
+    }
+
+    // 2. Parse CMaps for each font stream
+    const cmaps = {};
+    const globalCmap = new Map();
     for (const s of streams) {
         if (!s.includes('begincmap')) continue;
-
-        // bfchar: <srcHex> <dstHex>
-        const bfcharBlocks = s.matchAll(/(\d+)\s+beginbfchar\s*(.*?)\s*endbfchar/gs);
-        for (const b of bfcharBlocks) {
-            const pairs = b[2].matchAll(/<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>/g);
-            for (const p of pairs) {
-                cmap.set(parseInt(p[1], 16), String.fromCharCode(parseInt(p[2], 16)));
-            }
-        }
-
-        // bfrange format 1: <start> <end> [ <dst1> <dst2> ... ]
-        // bfrange format 2: <start> <end> <dstBase>
-        const bfrangeBlocks = s.matchAll(/(\d+)\s+beginbfrange\s*(.*?)\s*endbfrange/gs);
-        for (const b of bfrangeBlocks) {
-            const arrRanges = b[2].matchAll(/<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>\s*\[(.*?)\]/gs);
-            for (const ar of arrRanges) {
-                const start = parseInt(ar[1], 16);
-                const dsts = [...ar[3].matchAll(/<([0-9a-fA-F]+)>/g)].map(x => String.fromCharCode(parseInt(x[1], 16)));
-                for (let i = 0; i < dsts.length; i++) {
-                    cmap.set(start + i, dsts[i]);
-                }
-            }
-            const cleanBlock = b[2].replace(/<[0-9a-fA-F]+>\s+<[0-9a-fA-F]+>\s*\[.*?\]/gs, '');
-            const simpleRanges = cleanBlock.matchAll(/<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>\s+<([0-9a-fA-F]+)>/g);
-            for (const sr of simpleRanges) {
-                const start = parseInt(sr[1], 16);
-                const end = parseInt(sr[2], 16);
-                const base = parseInt(sr[3], 16);
-                for (let c = start; c <= end; c++) {
-                    cmap.set(c, String.fromCharCode(base + (c - start)));
-                }
-            }
+        const parsed = parseCMapStream(s);
+        for (const [k, v] of parsed.entries()) globalCmap.set(k, v);
+    }
+    for (const [fontId, toUniId] of Object.entries(fontToUnicodeMap)) {
+        const m = str.match(new RegExp('(^|\\r|\\n)' + toUniId + '\\s+0\\s+obj[\\s\\S]*?stream\\r?\\n([\\s\\S]*?)\\r?\\nendstream'));
+        if (m) {
+            try {
+                const dec = zlib.inflateSync(Buffer.from(m[2], 'latin1')).toString('latin1');
+                cmaps[toUniId] = parseCMapStream(dec);
+            } catch (e) {}
         }
     }
 
-    function decodeHex(hexStr) {
-        const clean = hexStr.replace(/\s+/g, '');
+    // 3. Map page resource names like /F4 to ToUnicode ID
+    const resFontMap = {};
+    const resFontRegex = /\/Font\s*<<([\s\S]*?)>>/g;
+    let rf;
+    while ((rf = resFontRegex.exec(str)) !== null) {
+        const pairs = rf[1].matchAll(/(\/F\w+)\s+(\d+)\s+0\s+R/g);
+        for (const p of pairs) {
+            const fontName = p[1];
+            const toUniId = fontToUnicodeMap[p[2]];
+            if (toUniId) resFontMap[fontName] = toUniId;
+        }
+    }
+
+    function decodeHex(cleanHex, cmap) {
         let res = '';
-        for (let i = 0; i < clean.length; i += 4) {
-            const hexChunk = clean.substr(i, 4);
-            if (hexChunk.length < 4) break;
-            const code = parseInt(hexChunk, 16);
-            if (cmap.has(code)) {
-                res += cmap.get(code);
-            } else if (code >= 32 && code <= 126) {
-                res += String.fromCharCode(code);
-            } else {
-                res += ' ';
-            }
+        for (let i = 0; i < cleanHex.length; i += 4) {
+            const code = parseInt(cleanHex.substr(i, 4), 16);
+            if (cmap && cmap.has(code)) res += cmap.get(code);
+            else if (globalCmap.has(code)) res += globalCmap.get(code);
+            else if (code >= 32 && code <= 126) res += String.fromCharCode(code);
+            else res += ' ';
         }
         return res;
     }
 
-    // 2. Decode text streams
-    let allText = [];
+    // 4. Decode content streams preserving lines via baseline Y coordinates
+    const pages = [];
     for (const s of streams) {
         if (s.includes('begincmap')) continue;
-        const tjMatches = s.matchAll(/\[(.*?)\]\s*TJ|(\([^\)]*\)|<[0-9a-fA-F\s]+>)\s*Tj/gs);
-        for (const m of tjMatches) {
-            if (m[1]) {
-                const tokens = m[1].matchAll(/\((.*?)\)|<([0-9a-fA-F\s]+)>/gs);
-                let chunk = '';
-                for (const t of tokens) {
-                    if (t[1] !== undefined) chunk += t[1];
-                    else if (t[2] !== undefined) chunk += decodeHex(t[2]);
-                }
-                if (chunk) allText.push(chunk);
-            } else if (m[2]) {
-                if (m[2].startsWith('<')) {
-                    allText.push(decodeHex(m[2].slice(1, -1)));
-                } else {
-                    allText.push(m[2].slice(1, -1));
+        if (s.includes('BT')) {
+            const btBlocks = s.matchAll(/BT([\s\S]*?)ET/g);
+            let lastY = null;
+            let streamText = '';
+            for (const bt of btBlocks) {
+                const bStr = bt[1];
+                let tmY = 0, tdY = 0;
+                const tmM = bStr.match(/([-\d\.]+)\s+([-\d\.]+)\s+([-\d\.]+)\s+([-\d\.]+)\s+([-\d\.]+)\s+([-\d\.]+)\s+Tm/);
+                if (tmM) tmY = parseFloat(tmM[6]);
+                const tdM = bStr.match(/([-\d\.]+)\s+([-\d\.]+)\s+Td/);
+                if (tdM) tdY = parseFloat(tdM[2]);
+                const curY = Math.round((tmY + tdY) * 10) / 10;
+                if (lastY !== null && Math.abs(curY - lastY) > 4) streamText += '\n';
+                lastY = curY;
+
+                let curFont = '/F4';
+                const fM = bStr.match(/(\/F\w+)\s+[\d\.]+\s+Tf/);
+                if (fM) curFont = fM[1];
+                const cmap = cmaps[resFontMap[curFont]] || globalCmap;
+
+                const tjM = bStr.matchAll(/(\([^\)]*\)|<[0-9a-fA-F\s]+>)\s*Tj|\[(.*?)\]\s*TJ/g);
+                for (const m of tjM) {
+                    if (m[1]) {
+                        const raw = m[1];
+                        if (raw.startsWith('<')) streamText += decodeHex(raw.slice(1, -1).replace(/\s+/g, ''), cmap);
+                        else streamText += raw.slice(1, -1);
+                    } else if (m[2]) {
+                        const tokens = m[2].matchAll(/\((.*?)\)|<([0-9a-fA-F\s]+)>|([-\d\.]+)/gs);
+                        for (const t of tokens) {
+                            if (t[1] !== undefined) streamText += t[1];
+                            else if (t[2] !== undefined) streamText += decodeHex(t[2].replace(/\s+/g, ''), cmap);
+                            else if (t[3] !== undefined && parseFloat(t[3]) < -150) streamText += ' ';
+                        }
+                    }
                 }
             }
+            if (streamText.trim()) pages.push(streamText);
+        } else {
+            const tjM = s.matchAll(/(\([^\)]*\)|<[0-9a-fA-F\s]+>)\s*Tj|\[(.*?)\]\s*TJ/g);
+            let sTxt = '';
+            for (const m of tjM) {
+                if (m[1]) {
+                    const raw = m[1];
+                    if (raw.startsWith('<')) sTxt += decodeHex(raw.slice(1, -1).replace(/\s+/g, ''), globalCmap);
+                    else sTxt += raw.slice(1, -1);
+                } else if (m[2]) {
+                    const tokens = m[2].matchAll(/\((.*?)\)|<([0-9a-fA-F\s]+)>/gs);
+                    for (const t of tokens) {
+                        if (t[1] !== undefined) sTxt += t[1];
+                        else if (t[2] !== undefined) sTxt += decodeHex(t[2].replace(/\s+/g, ''), globalCmap);
+                    }
+                }
+            }
+            if (sTxt.trim()) pages.push(sTxt);
         }
     }
 
-    return allText.join(' ')
-        .replace(/\\([0-7]{1,3})/g, (match, oct) => String.fromCharCode(parseInt(oct, 8)))
+    return pages.join('\n')
+        .replace(/\\([0-7]{1,3})/g, (m, oct) => String.fromCharCode(parseInt(oct, 8)))
         .replace(/\\(.)/g, '$1')
-        .replace(/\s+/g, ' ')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n\s*\n/g, '\n')
         .trim();
 }
 
@@ -137,7 +204,8 @@ function parseCoursePlanHeuristic(text, fileName = '') {
     const mTec = preface.match(/Habilita..o\s+(?:Profissional\s+)?(?:de\s+)?T.cnico\s+em\s+([0-9A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ\s]{4,60})/i)
         || preface.match(/T[EÉ]CNICO\s+EM\s+([0-9A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ\s]{4,60})/i);
     const mCai = preface.match(/Aprendizagem\s+Industrial\s*(?::\s*|\s+)([0-9A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ\s]{4,60})/i);
-    const mFic = preface.match(/(?:Aperfeiçoamento|Qualificação|Iniciação)\s+Profissional\s*(?::\s*|\s+)([0-9A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇa-záéíóúâêîôûãõç\s\-_/]{4,60})/i);
+    const mFicDash = preface.match(/(?:Aperfeiçoamento|Qualificação|Iniciação)\s+Profissional\s*[—–-]\s*([^\n\r]{4,120})/i);
+    const mFic = mFicDash || preface.match(/(?:Aperfeiçoamento|Qualificação|Iniciação)\s+Profissional\s*(?::\s*|\s+)([0-9A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇa-záéíóúâêîôûãõç\s\-_/]{4,80})/i);
 
     if (cursoTipo === 'tecnico' && mTec) {
         cursoNome = "Técnico em " + mTec[1].trim();
@@ -152,6 +220,7 @@ function parseCoursePlanHeuristic(text, fileName = '') {
     // Clean extraneous phrases from cursoNome
     cursoNome = cursoNome.replace(/\b(Plano de Curso|SENAI.*|SÃO PAULO.*|Página.*|SUMÁRIO.*|Eixo Tecnológico.*|De acordo com.*|Diretoria.*)$/i, '').trim();
     cursoNome = cursoNome.replace(/^(?:Aperfeiçoamento|Qualificação|Iniciação)\s+Profissional\s*(?:–|-|:)?\s*/i, '').trim();
+    cursoNome = cursoNome.replace(/^SÃO\s+PAULO\s+/i, '').trim();
     cursoNome = cursoNome.replace(/\s+/g, ' ');
 
     // 3. Detect 3 vs 4 Semesters
@@ -171,12 +240,18 @@ function parseCoursePlanHeuristic(text, fileName = '') {
     const unidades = [];
     const seenUcs = new Set();
 
-    // Focus search on Quadro de Organização Curricular (after Table of Contents)
+    // Focus search on Quadro de Organização Curricular (filtering out Table of Contents)
     let searchScope = text;
-    const quadroMatches = [...text.matchAll(/Quadro[s]?\s+de\s+Organização\s+Curricular/gi)].filter(m => m.index > 5000);
+    const quadroMatches = [...text.matchAll(/Quadro[s]?\s+de\s+Organização\s+Curricular/gi)]
+        .filter(m => !/\s+\d{1,3}\s*\r?\n\s*[a-z]\)/i.test(text.slice(m.index, m.index + 80)));
+    
     if (quadroMatches.length > 0) {
-        const startIdx = quadroMatches[0].index;
-        searchScope = text.slice(startIdx, startIdx + 5000);
+        // Pick the match that is past preface (or last one)
+        const qMatch = quadroMatches.find(m => m.index > 1500) || quadroMatches[0];
+        const startIdx = qMatch.index;
+        const nextSectionMatch = text.slice(startIdx).match(/\b(?:b\)\s+Desenvolvimento\s+Metodológico|c\)\s+Ementa|V\.\s+CRITÉRIOS)\b/i);
+        const endIdx = nextSectionMatch ? (startIdx + nextSectionMatch.index) : Math.min(startIdx + 6000, text.length);
+        searchScope = text.slice(startIdx, endIdx);
     }
 
     // Clean structural words that glue to UC names in PDF text stream
@@ -193,8 +268,8 @@ function parseCoursePlanHeuristic(text, fileName = '') {
         let rawName = m[1].replace(/\s+/g, ' ').trim();
         rawName = rawName.replace(/^(?:Módulo|Etapa|Semestre|Nível|Legislação|Quadro|Operacionalização|Horas|Atividade)[^\w]*[A-Za-z0-9]*\s*/i, '').trim();
         const ch = parseInt(m[2]);
-        const isBlacklisted = /\b(?:página|departamento|conselho|resolução|artigo|título|carga\s+hor[aá]ria|total|itiner[aá]rio|sum[aá]rio|anexo|etapa|nível\s+de\s+ensino|legisla[çc][aã]o|unidade\s+curricular)\b/i.test(rawName)
-            || /^(?:entre|acima|como|pelo|pela|conforme|segundo|de\s+acordo|a\s+partir)\b/i.test(rawName);
+        const isBlacklisted = /\b(?:página|departamento|conselho|resolução|artigo|título|carga\s+hor[aá]ria|total|itiner[aá]rio|sum[aá]rio|anexo|etapa|nível\s+de\s+ensino|legisla[çc][aã]o|unidade\s+curricular|turmas?|máximo|mínimo|frequência|avaliação|aproveitamento|estágio|número)\b/i.test(rawName)
+            || /^(?:entre|acima|como|pelo|pela|conforme|segundo|de\s+acordo|a\s+partir|as|os|um|uma)\b/i.test(rawName);
 
         if (!isBlacklisted && ch >= 20 && ch <= 400 && rawName.length >= 6 && rawName.length <= 65) {
             const key = rawName.toUpperCase();
@@ -217,8 +292,8 @@ function parseCoursePlanHeuristic(text, fileName = '') {
             let rawName = mFallback[1].replace(/\s+/g, ' ').trim();
             rawName = rawName.replace(/^(?:Módulo|Etapa|Semestre|Nível|Legislação|Quadro|Operacionalização|Horas|Atividade)[^\w]*[A-Za-z0-9]*\s*/i, '').trim();
             const ch = parseInt(mFallback[2]);
-            const isBlacklisted = /\b(?:página|departamento|conselho|resolução|artigo|título|carga\s+hor[aá]ria|total|itiner[aá]rio|sum[aá]rio|anexo|etapa|nível\s+de\s+ensino|legisla[çc][aã]o|unidade\s+curricular)\b/i.test(rawName)
-                || /^(?:entre|acima|como|pelo|pela|conforme|segundo|de\s+acordo|a\s+partir)\b/i.test(rawName);
+            const isBlacklisted = /\b(?:página|departamento|conselho|resolução|artigo|título|carga\s+hor[aá]ria|total|itiner[aá]rio|sum[aá]rio|anexo|etapa|nível\s+de\s+ensino|legisla[çc][aã]o|unidade\s+curricular|turmas?|máximo|mínimo|frequência|avaliação|aproveitamento|estágio|número)\b/i.test(rawName)
+                || /^(?:entre|acima|como|pelo|pela|conforme|segundo|de\s+acordo|a\s+partir|as|os|um|uma)\b/i.test(rawName);
             if (!isBlacklisted && ch >= 20 && ch <= 400 && rawName.length >= 6 && rawName.length <= 65) {
                 const key = rawName.toUpperCase();
                 if (!seenUcs.has(key)) {
@@ -253,8 +328,23 @@ function parseCoursePlanHeuristic(text, fileName = '') {
         }
     }
 
-    // 7. Deep Extraction: Enrich every detected UC with official Capacidades & Conhecimentos
+    // Clean duplicate/partial matches if a full UC ementa name exists (e.g. "Desenvolvimento de Aplicações com IA...")
+    const finalUnidades = [];
     for (const u of unidades) {
+        const uNorm = u.nome.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const isSubstringOfLonger = unidades.some(other => {
+            const oNorm = other.nome.toLowerCase().replace(/[^a-z0-9]/g, '');
+            return oNorm !== uNorm && oNorm.includes(uNorm) && oNorm.length > uNorm.length;
+        });
+        if (!isSubstringOfLonger) {
+            finalUnidades.push(u);
+        }
+    }
+
+    const ucsToUse = finalUnidades.length > 0 ? finalUnidades : unidades;
+
+    // 7. Deep Extraction: Enrich every detected UC with official Capacidades & Conhecimentos
+    for (const u of ucsToUse) {
         const details = extractUcDetailsFromText(text, u.nome);
         if (details) {
             u.detalhes = details;
@@ -272,7 +362,7 @@ function parseCoursePlanHeuristic(text, fileName = '') {
         semestres,
         hasRemoto,
         hasRemoteHours: hasRemoto,
-        unidades: unidades.slice(0, 25),
+        unidades: ucsToUse.slice(0, 25),
         _extractedVia: 'heuristica'
     };
 }
@@ -350,9 +440,9 @@ function extractUcDetailsFromText(fullText, ucName) {
     // Clean page running headers and footers that repeat across pages
     const cleanBlock = rawBlock.replace(/Plano\s+de\s+Curso[^\d]{1,60}Página\s+\d+\s+(?:de\s+\d+)?(?:\s*MÓDULO\s+[^\s]+)?(?:\s*UNIDADE\s+CURRICULAR:\s*[^—–-]{3,50}—\s*\d+\s*horas)?/gi, ' ');
 
-    // 1. Objetivo da UC
+    // 1. Objetivo da UC (avoid false match with inline lowercase "capacidades técnicas")
     let objetivo = '';
-    const objM = cleanBlock.match(/Objetivo\s*[:]\s*(.*?)(?=(?:Competências\s+Específicas|Capacidades\s+(?:T[eé]cnicas|B[aá]sicas)\s*\d{1,2}\.|Capacidades\s+T[eé]cnicas\s*•|CONTEÚDO\s+FORMATIVO))/i);
+    const objM = cleanBlock.match(/Objetivo\s*[:]\s*(.*?)(?=(?:Competências\s+Específicas|CONTEÚDO\s+FORMATIVO|\n\s*(?:Capacidades|Competências)|$))/i);
     let remainder = cleanBlock;
     if (objM) {
         objetivo = objM[1].replace(/\s+/g, ' ').trim();
@@ -366,23 +456,60 @@ function extractUcDetailsFromText(fullText, ucName) {
     const capacidadesSocioemocionais = [];
     const conhecimentos = [];
 
-    // 1. Extração estruturada por seções oficiais SENAI (Capacidades Básicas/Técnicas/Profissionais, Socioemocionais e Conhecimentos)
-    const tecMatch = ucContent.match(/(?:Capacidades|Competências)\s+(?:B[aá]sicas|T[eé]cnicas|Profissionais|Espec[ií]ficas)([\s\S]*?)(?=Capacidades\s+(?:Socioemocionais|Sociais)|Conhecimentos|CONTEÚDO\s+FORMATIVO|Bases\s+Tecnol[oó]gicas|$)/i);
-    const socioMatch = ucContent.match(/Capacidades\s+(?:Socioemocionais|Sociais(?:,\s*Organizativas)?(?:\s*e\s*Metodol[oó]gicas)?)([\s\S]*?)(?=Conhecimentos|CONTEÚDO\s+FORMATIVO|Bases\s+Tecnol[oó]gicas|Recomendações|Ambiente|$)/i);
-    const conhecMatch = ucContent.match(/(?:Conhecimentos|CONTEÚDO\s+FORMATIVO|Bases\s+Tecnol[oó]gicas)([\s\S]*?)(?=Recomendações|Ambiente|Referências|INSTALAÇÕES|$)/i);
+    // Isolate Socioemocionais section first
+    const socioMatch = ucContent.match(/Capacidades\s+(?:Socioemocionais|Sociais(?:,\s*Organizativas)?(?:\s*e\s*Metodol[oó]gicas)?)([\s\S]*?)(?=Recomendações|Ambiente|Referências|INSTALAÇÕES|$)/i);
+    let contentBeforeSocio = ucContent;
+    if (socioMatch) {
+        contentBeforeSocio = ucContent.slice(0, socioMatch.index);
+        const socioBlock = socioMatch[1];
 
-    if (tecMatch) {
+        // 1. Match inline or numbered socio items (e.g. "1. Demonstrar atenção a detalhes.")
+        const socioMatches = socioBlock.matchAll(/(?:^|\s)(?:(\d{1,2})\.\s+)?((?:Demonstrar|Cumprir|Preservar|Agir|Prevenir|Compartilhar|Trabalhar\s+em\s+equipe)\b[^\.\n\r]+?\.)/gi);
+        for (const sm of socioMatches) {
+            let capStr = sm[2].trim().replace(/\s+/g, ' ');
+            capStr = capStr.replace(/\s+(?:Autogest[aã]o|Pensamento\s+anal[ií]tico|Resili[eê]ncia\s+emocional|Engajamento|Abertura).*$/i, '').trim();
+            if (capStr.length > 5 && !capacidadesSocioemocionais.includes(capStr)) {
+                capacidadesSocioemocionais.push(capStr);
+            }
+        }
+
+        // 2. Fallback to line-by-line if inline regex found nothing
+        if (capacidadesSocioemocionais.length === 0) {
+            const lines = socioBlock.split(/\r?\n/);
+            let cur = '';
+            lines.forEach(l => {
+                let trimmed = l.trim();
+                if (!trimmed || /^(?:Plano|Página|Módulo|Unidade)/i.test(trimmed)) return;
+                // Skip standalone category headings
+                if (/^(?:Pensamento\s+anal[ií]tico|Autogest[aã]o|Resili[eê]ncia\s+emocional|Engajamento|Abertura|Amabilidade)$/i.test(trimmed)) return;
+                if (/^\d{1,2}\.\s*/.test(trimmed) || /^(?:Demonstrar|Cumprir|Preservar|Agir|Prevenir|Compartilhar|Trabalhar\s+em\s+equipe)\b/i.test(trimmed)) {
+                    if (cur && cur.length > 5) {
+                        cur = cur.replace(/\s+(?:Autogest[aã]o|Pensamento\s+anal[ií]tico|Resili[eê]ncia\s+emocional|Engajamento|Abertura).*$/i, '').trim();
+                        if (!capacidadesSocioemocionais.includes(cur)) capacidadesSocioemocionais.push(cur);
+                    }
+                    cur = trimmed.replace(/^\d{1,2}\.\s*/, '').trim();
+                } else if (cur) {
+                    cur += ' ' + trimmed;
+                }
+            });
+            if (cur && cur.length > 5) {
+                cur = cur.replace(/\s+(?:Autogest[aã]o|Pensamento\s+anal[ií]tico|Resili[eê]ncia\s+emocional|Engajamento|Abertura).*$/i, '').trim();
+                if (!capacidadesSocioemocionais.includes(cur)) capacidadesSocioemocionais.push(cur);
+            }
+        }
+    }
+
+    // 1. Extração estruturada por seções oficiais SENAI (only stop at Conhecimentos if on a new line, not on table header)
+    const tecMatch = contentBeforeSocio.match(/(?:Capacidades|Competências)\s+(?:B[aá]sicas|T[eé]cnicas|Profissionais|Espec[ií]ficas)([\s\S]*?)(?=(?:\r?\n\s*(?:Conhecimentos|CONTEÚDO\s+FORMATIVO|Bases\s+Tecnol[oó]gicas))|$)/i);
+    if (tecMatch && tecMatch[1].trim().length > 20) {
         const lines = tecMatch[1].split(/\r?\n/);
         let cur = '';
         lines.forEach(l => {
             const trimmed = l.trim();
-            if (!trimmed || /^(?:Plano|Página|Módulo|Unidade|Competências\s+Específicas)/i.test(trimmed)) return;
-            if (/^\d{1,2}\.\s*/.test(trimmed)) {
+            if (!trimmed || /^(?:Plano|Página|Módulo|Unidade|Competências\s+Específicas|Capacidades\s+T[eé]cnicas|Conhecimentos)/i.test(trimmed)) return;
+            if (/^\d{1,2}\.\s*/.test(trimmed) || trimmed.startsWith('•') || trimmed.startsWith('-')) {
                 if (cur && cur.length > 5 && !capacidadesTecnicas.includes(cur)) capacidadesTecnicas.push(cur);
-                cur = trimmed.replace(/^\d{1,2}\.\s*/, '').trim();
-            } else if (trimmed.startsWith('•') || trimmed.startsWith('-')) {
-                if (cur && cur.length > 5 && !capacidadesTecnicas.includes(cur)) capacidadesTecnicas.push(cur);
-                cur = trimmed.replace(/^[•\-]\s*/, '').trim();
+                cur = trimmed.replace(/^\d{1,2}\.\s*|^[•\-]\s*/, '').trim();
             } else if (cur) {
                 cur += ' ' + trimmed;
             }
@@ -390,29 +517,49 @@ function extractUcDetailsFromText(fullText, ucName) {
         if (cur && cur.length > 5 && !capacidadesTecnicas.includes(cur)) capacidadesTecnicas.push(cur);
     }
 
-    if (socioMatch) {
-        const lines = socioMatch[1].split(/\r?\n/);
-        let cur = '';
-        lines.forEach(l => {
-            const trimmed = l.trim();
-            if (!trimmed || /^(?:Plano|Página|Módulo|Unidade)/i.test(trimmed)) return;
-            if (/^\d{1,2}\.\s*/.test(trimmed)) {
-                if (cur && cur.length > 5 && !capacidadesSocioemocionais.includes(cur)) capacidadesSocioemocionais.push(cur);
-                cur = trimmed.replace(/^\d{1,2}\.\s*/, '').trim();
-            } else if (/^(?:Demonstrar|Cumprir|Preservar|Agir|Prevenir|Compartilhar|Trabalhar)\b/i.test(trimmed)) {
-                if (cur && cur.length > 5 && !capacidadesSocioemocionais.includes(cur)) capacidadesSocioemocionais.push(cur);
-                cur = trimmed;
-            } else if (/^(?:Trabalhar em equipe|Autonomia|Comunicação|Relacionamento|Responsabilidade|Ética|Organização|Criatividade)/i.test(trimmed)) {
-                if (cur && cur.length > 5 && !capacidadesSocioemocionais.includes(cur)) capacidadesSocioemocionais.push(cur);
-                cur = '';
-            } else if (cur) {
-                cur += ' ' + trimmed;
+    const tecVerbs = /^(?:Diferenciar|Validar|Treinar|Integrar|Identificar|Utilizar|Criar|Representar|Aplicar|Elaborar|Configurar|Normalizar|Documentar|Executar|Analisar|Calcular|Efetuar|Interpretar|Montar|Dimensionar|Definir|Descartar|Realizar|Corrigir|Operar|Estacionar|Manobrar|Movimentar|Distinguir|Carregar|Descarregar|Empilhar|Desempilhar|Apontar|Auxiliar|Controlar|Registrar|Classificar|Programar|Desenvolver|Testar|Implantar|Monitorar|Adequar|Emitir|Verificar|Localizar|Preencher|Instalar|Substituir|Revisar|Planejar|Reconhecer|Projetar|Simular|Inspecionar|Estruturar|Produzir|Avaliar|Selecionar|Manipular|Diagnosticar|Medir|Aferir|Parametrizar|Codificar|Ajustar|Manter|Sintetizar|Construir|Modelar|Mapear|Formular|Organizar|Coordenar|Orientar|Auditar|Gerenciar|Supervisionar)\b/i;
+
+    // 2. Fallback heurístico e leitor de tabelas caso a divisão por seções não tenha encontrado itens
+    if (capacidadesTecnicas.length === 0 || conhecimentos.length === 0) {
+        const itemRegex = /(?:^|\s)(\d{1,2}(?:\.\d{1,2})*\.?|[•·])\s+([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][^\n\r]+?)(?=(?:\s+\d{1,2}(?:\.\d{1,2})*\.?\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ]|$|[•·]))/g;
+        let it;
+        while ((it = itemRegex.exec(contentBeforeSocio)) !== null) {
+            const marker = it[1];
+            let text = it[2].replace(/;$/, '').replace(/\s+/g, ' ').trim();
+            if (/^(?:Plano|Página|Módulo|Unidade|Competências\s+Específicas)/i.test(text)) continue;
+
+            const isVerb = tecVerbs.test(text);
+            const isSocioVerb = /^(?:Demonstrar|Cumprir|Preservar|Agir|Prevenir|Compartilhar|Trabalhar\s+em\s+equipe)\b/i.test(text);
+
+            if (isSocioVerb) {
+                const cleanSoc = text.replace(/\s+(?:Autogest[aã]o|Pensamento|Resili[eê]ncia).*$/i, '').trim();
+                if (!capacidadesSocioemocionais.includes(cleanSoc)) {
+                    capacidadesSocioemocionais.push(cleanSoc);
+                }
+            } else if (isVerb && (marker === '•' || marker === '·' || /^\d{1,2}\.?$/.test(marker))) {
+                const gluedNum = text.match(/^(.*?\.?)\s+(\d{1,2}\.\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ].*)$/);
+                if (gluedNum && gluedNum[1].length > 15) {
+                    const capOnly = gluedNum[1].trim();
+                    if (!capacidadesTecnicas.includes(capOnly)) capacidadesTecnicas.push(capOnly);
+                    const conRemainder = gluedNum[2].trim();
+                    if (!conhecimentos.includes(conRemainder)) conhecimentos.push(conRemainder);
+                } else {
+                    if (text.length > 8 && !capacidadesTecnicas.includes(text)) {
+                        capacidadesTecnicas.push(text);
+                    }
+                }
+            } else {
+                const conFull = (marker !== '•' && marker !== '·' ? marker + ' ' : '') + text;
+                if (text.length > 3 && !conhecimentos.includes(conFull)) {
+                    conhecimentos.push(conFull);
+                }
             }
-        });
-        if (cur && cur.length > 5 && !capacidadesSocioemocionais.includes(cur)) capacidadesSocioemocionais.push(cur);
+        }
     }
 
-    if (conhecMatch) {
+    // Extract Conhecimentos from dedicated section if available
+    const conhecMatch = ucContent.match(/(?:Conhecimentos|CONTEÚDO\s+FORMATIVO|Bases\s+Tecnol[oó]gicas)([\s\S]*?)(?=Recomendações|Ambiente|Referências|INSTALAÇÕES|$)/i);
+    if (conhecMatch && conhecimentos.length === 0) {
         const lines = conhecMatch[1].split(/\r?\n/);
         lines.forEach(l => {
             const trimmed = l.trim();
@@ -421,45 +568,6 @@ function extractUcDetailsFromText(fullText, ucName) {
                 if (!conhecimentos.includes(trimmed)) conhecimentos.push(trimmed);
             }
         });
-    }
-
-    // 2. Fallback heurístico caso a divisão por seções não tenha encontrado itens
-    if (capacidadesTecnicas.length === 0 || conhecimentos.length === 0) {
-        const items = [];
-        const numRe = /(?:^|\s)(\d{1,2}\.(?:\d{1,2}\.?)?)\s+([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][^\n\r]+?)(?=(?:\s+\d{1,2}\.|$|[•·]))/g;
-        let numM;
-        while ((numM = numRe.exec(ucContent)) !== null) {
-            items.push({ num: numM[1], text: numM[2].trim() });
-        }
-
-        const bulletRe = /[•·]\s*([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][^•·\n\r]{6,250})/g;
-        let bM;
-        while ((bM = bulletRe.exec(ucContent)) !== null) {
-            items.push({ num: '•', text: bM[1].trim() });
-        }
-
-        const tecVerbs = /^(?:Identificar|Utilizar|Criar|Representar|Aplicar|Elaborar|Configurar|Normalizar|Documentar|Executar|Analisar|Calcular|Efetuar|Interpretar|Montar|Dimensionar|Definir|Descartar|Realizar|Corrigir|Operar|Estacionar|Manobrar|Movimentar|Distinguir|Carregar|Descarregar|Empilhar|Desempilhar|Apontar|Auxiliar|Controlar|Registrar|Classificar|Programar|Desenvolver|Testar|Implantar|Monitorar|Adequar|Emitir|Verificar|Localizar|Preencher|Instalar|Substituir|Revisar|Planejar|Reconhecer|Projetar|Simular|Inspecionar|Estruturar|Produzir|Avaliar|Selecionar|Manipular|Diagnosticar|Medir|Aferir|Parametrizar|Codificar|Integrar|Ajustar|Manter|Sintetizar|Construir|Modelar|Mapear)\b/i;
-
-        for (const it of items) {
-            const rawText = it.text.replace(/;$/, '').replace(/\s+/g, ' ').trim();
-            if (/^(?:Plano|Página|Módulo|Unidade)/i.test(rawText)) continue;
-
-            if (/^Demonstrar\b/i.test(rawText) || /^Cumprir\s+procedimentos/i.test(rawText) || /^Preservar\b/i.test(rawText) || /^Prevenir\b/i.test(rawText) || /^Compartilhar\s+informa/i.test(rawText) || /^Trabalhar\s+em\s+equipe/i.test(rawText)) {
-                const cleanSoc = rawText.replace(/\s+Conhecimentos.*$/i, '').trim();
-                if (!capacidadesSocioemocionais.includes(cleanSoc)) {
-                    capacidadesSocioemocionais.push(cleanSoc);
-                }
-            } else if (tecVerbs.test(rawText)) {
-                if (rawText.length > 8 && !capacidadesTecnicas.includes(rawText)) {
-                    capacidadesTecnicas.push(rawText);
-                }
-            } else {
-                const conClean = (it.num !== '•' ? it.num + ' ' : '') + rawText;
-                if (rawText.length > 3 && !conhecimentos.includes(conClean)) {
-                    conhecimentos.push(conClean);
-                }
-            }
-        }
     }
 
     // Padrão socioemocional caso não venha no PDF

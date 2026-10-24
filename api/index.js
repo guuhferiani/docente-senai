@@ -85,12 +85,12 @@ const SAMPLE_COURSES = {
         docente: "Gustavo Feriani",
         escola: "Escola SENAI \"Mariano Ferraz\"",
         capacidadesTecnicas: [
-            "Diferenciar IA tradicional e IA generativa, tendo em vista, finalidades, entradas e saídas.",
+            "Diferenciar IA tradicional e IA generativa, tendo em vista, finalidades, entradas e saídas, no contexto de desenvolvimento de softwares.",
             "Utilizar modelos de IA generativa pré-treinados para interpretação de entradas e saídas.",
-            "Elaborar prompts estruturados para obtenção de respostas, de acordo com requisitos.",
+            "Elaborar prompts estruturados para obtenção de respostas, de acordo com requisitos de aplicações.",
             "Realizar construção e implantação de protótipo, com utilização de Gemini/Imagen na plataforma Vertex AI.",
-            "Utilizar ferramenta Antigravity para geração de código e estruturação de projetos.",
-            "Validar protótipo funcional com IA generativa, por meio de aplicação de testes e IA responsável."
+            "Utilizar ferramenta Antigravity para geração de código e estruturação de projetos com aplicação de IA generativa.",
+            "Validar protótipo funcional com IA generativa, por meio de aplicação de testes e boas práticas de IA responsável."
         ],
         capacidadesSocioemocionais: [
             "Demonstrar atenção a detalhes.",
@@ -579,7 +579,11 @@ ${courseInfo.objetivoUC ? `- Objetivo da Unidade Curricular (utilize este exatam
 ${officialCapabilitiesPrompt}
 
 Diretrizes Rigorosas do SENAI MSEP (Diretrizes Oficiais dos Prompts MSEP):
-1. REGRA FUNDAMENTAL: ${hasOfficialCaps ? 'UTILIZE OBRIGATORIAMENTE as Capacidades Básicas, Técnicas e Socioemocionais Oficiais listadas acima. Distribua todas elas entre as Situações de Aprendizagem.' : 'NUNCA FAÇA ABREVIAÇÕES DE CONTEÚDOS, CAPACIDADES OU CONHECIMENTOS.'} Reescreva a descrição técnica completa de cada capacidade e conhecimento, NUNCA utilize códigos ou siglas como 'K1', 'CT02' ou 'CS3'.
+1. REGRA ABSOLUTA E INVIOLÁVEL (BLINDAGEM TOTAL DAS CAPACIDADES OFICIAIS):
+${hasOfficialCaps ? `- VOCÊ DEVE UTILIZAR EXCLUSIVAMENTE AS CAPACIDADES BÁSICAS/TÉCNICAS E SOCIOEMOCIONAIS OFICIAIS LISTADAS ACIMA!
+- É TERMINANTEMENTE PROIBIDO inventar, criar, modificar, resumir ou alterar o texto de qualquer capacidade.
+- No array 'capacidadesTecnicas' e 'capacidadesSocioemocionais' de cada SA, e em CADA objeto do array 'criterios' no campo 'cap', O VALOR DEVE SER LITERALMENTE IDÊNTICO ao texto oficial fornecido acima.
+- DISTRIBUA TODAS as capacidades técnicas oficiais fornecidas acima entre as Situações de Aprendizagem (nenhuma capacidade oficial pode ficar de fora).` : `- NUNCA FAÇA ABREVIAÇÕES DE CONTEÚDOS, CAPACIDADES OU CONHECIMENTOS. Reescreva a descrição técnica completa de cada capacidade e conhecimento, NUNCA utilize códigos ou siglas como 'K1', 'CT02' ou 'CS3'.`}
 2. Determine a quantidade adequada de Situações de Aprendizagem (SAs) para a carga horária (ex: 20h = 1 SA; 40-60h = 2 SAs; 80-100h = 3 SAs; 120-200h = 4 SAs).
 3. A soma exata do campo 'aulas' de todas as SAs DEVE SER EXATAMENTE IGUAL a ${totalHours} horas.
 4. Para cada SA:
@@ -587,8 +591,8 @@ Diretrizes Rigorosas do SENAI MSEP (Diretrizes Oficiais dos Prompts MSEP):
    - 'titulo': Título temático da Situação de Aprendizagem (ex: "Fundamentação e Planejamento Técnico", NUNCA repita prefixos como "SA 01", "Situação de Aprendizagem 01" ou "Bloco 1").
    - 'aulas': Quantidade de horas (inteiro).
    - 'estrategiaTipo': 'Situação-problema', 'Projeto', 'Estudo de caso' ou 'Pesquisa aplicada' (conforme sugerido no Book MSEP).
-   - 'capacidadesTecnicas': Array com as capacidades básicas ou técnicas oficiais atribuídas a esta SA.
-   - 'capacidadesSocioemocionais': Array com 1 a 3 capacidades socioemocionais (ex: 'Demonstrar assertividade na comunicação.', 'Demonstrar escuta ativa.', 'Demonstrar iniciativa.').
+   - 'capacidadesTecnicas': Array com as capacidades técnicas oficiais atribuídas a esta SA (redação idêntica à oficial).
+   - 'capacidadesSocioemocionais': Array com as capacidades socioemocionais oficiais atribuídas a esta SA.
    - 'conhecimentos': Array com tópicos de conhecimentos técnicos pertinentes (redação completa).
    - 'contextualizacao': Narrativa imersiva de uma empresa ou cenário industrial real com um problema a ser resolvido.
    - 'observacoesDocente': Instruções e dicas pedagógicas para a condução do professor (foco, mediação, segurança).
@@ -598,13 +602,13 @@ Diretrizes Rigorosas do SENAI MSEP (Diretrizes Oficiais dos Prompts MSEP):
    - 'instrumentosAvaliacao': Instrumentos avaliativos (ex: 'Avaliação prática de desempenho; Relatório técnico; Checklist').
    - 'recursos': Máquinas, bancadas didáticas, ferramentas, instrumentos ou softwares específicos da área.
    - 'criterios': Array de objetos com os critérios de avaliação (IRRAC).
-     Para CADA capacidade técnica ou básica desta SA:
-       - Formule 1 Critério Crítico (tipo "C"): Desempenho técnico essencial e inegociável da capacidade, iniciado com verbo no presente do indicativo.
-       - Formule 1 Critério Desejável (tipo "D"): Padrão de qualidade, acabamento, eficiência ou boas práticas, iniciado com verbo no presente do indicativo.
+     Para CADA capacidade técnica desta SA:
+       - Formule 1 Critério Crítico (tipo "C"): Desempenho técnico essencial e inegociável da capacidade, iniciado com verbo no presente do indicativo (ex: "Diferencia...", "Desenvolve...", "Configura...", "Valida...").
+       - Formule 1 Critério Desejável (tipo "D"): Padrão de qualidade, acabamento, eficiência ou boas práticas, iniciado com verbo no presente do indicativo (ex: "Aplica normas técnicas...", "Otimiza rotinas...").
      Para CADA capacidade socioemocional desta SA:
        - Formule critérios com verbos no presente do indicativo (balanceando tipo "C" e "D").
      IMPORTANTE: Em CADA objeto do array 'criterios', preencha OBRIGATORIAMENTE:
-       - 'cap': Nome completo da capacidade avaliada (NUNCA deixe vazio nem coloque abreviação).
+       - 'cap': Nome oficial EXATO da capacidade avaliada (CÓPIA LITERAL, SEM ALTERAÇÃO).
        - 'crit': Redação completa do critério observável formulado no presente do indicativo (NUNCA deixe vazio ou undefined).
        - 'tipo': "C" ou "D".
 
@@ -864,7 +868,10 @@ function conjugateToPresentIndicative(verb) {
         'fazer': 'faz', 'construir': 'constrói', 'distinguir': 'distingue',
         'substituir': 'substitui', 'medir': 'mede', 'manter': 'mantém',
         'obter': 'obtém', 'prever': 'prevê', 'propor': 'propõe',
-        'ver': 'vê', 'ler': 'lê', 'dar': 'dá', 'ir': 'vai'
+        'ver': 'vê', 'ler': 'lê', 'dar': 'dá', 'ir': 'vai',
+        'diferenciar': 'diferencia', 'validar': 'valida', 'integrar': 'integra',
+        'treinar': 'treina', 'estruturar': 'estrutura', 'projetar': 'projeta',
+        'avaliar': 'avalia', 'implementar': 'implementa'
     };
     if (irregulars[v]) return irregulars[v];
     if (v.endsWith('ar')) return v.slice(0, -2) + 'a';
@@ -878,9 +885,16 @@ function formulateCriteriaFromCapability(capText, courseName) {
     const words = clean.split(/\s+/);
     const firstWord = words[0] || 'Executar';
     const conjugated = conjugateToPresentIndicative(firstWord);
-    const capRest = words.slice(1).join(' ');
-
-    const conjugatedCap = `${conjugated.charAt(0).toUpperCase() + conjugated.slice(1)} ${capRest}`;
+    
+    let conjugatedCap;
+    // Check for compound verb structure: "Projetar e estruturar..." -> "Projeta e estrutura..."
+    if (words.length >= 3 && words[1].toLowerCase() === 'e' && /^[a-záéíóúâêîôûãõç]+(?:ar|er|ir)$/i.test(words[2])) {
+        const secondConj = conjugateToPresentIndicative(words[2]);
+        conjugatedCap = `${conjugated.charAt(0).toUpperCase() + conjugated.slice(1)} e ${secondConj} ${words.slice(3).join(' ')}`;
+    } else {
+        const capRest = words.slice(1).join(' ');
+        conjugatedCap = `${conjugated.charAt(0).toUpperCase() + conjugated.slice(1)} ${capRest}`;
+    }
 
     const critico = `${conjugatedCap}, atendendo aos parâmetros técnicos e especificações requeridas.`;
     const desejavel = `Aplica normas técnicas, requisitos de qualidade e boas práticas operacionais com rigor e organização.`;
