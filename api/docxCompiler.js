@@ -7,9 +7,22 @@ const AdmZip = require('adm-zip');
 const fs = require('fs');
 const path = require('path');
 
-function escapeXml(str) {
-    if (!str) return '';
+const FONT = '<w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/>';
+
+/**
+ * Remove caracteres proibidos pelo XML 1.0 (caracteres de controle vindos da
+ * extração de PDF / respostas da IA e surrogates órfãos). Qualquer um deles
+ * dentro do document.xml faz o Word/Google Docs recusarem o arquivo.
+ */
+function sanitizeText(str) {
     return String(str)
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, '')
+        .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
+}
+
+function escapeXml(str) {
+    if (str === null || str === undefined || str === '') return '';
+    return sanitizeText(str)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
@@ -60,48 +73,140 @@ function calculateNiveisDesempenho(totalCrit, totalDesej) {
     ];
 }
 
+// --------------------------------------------------------------------------
+// Utilitários estruturais de XML (com controle de profundidade, para que
+// tabelas aninhadas não quebrem a separação de linhas/células)
+// --------------------------------------------------------------------------
+
+/**
+ * Retorna as faixas {start, end} dos elementos <w:TAG> de nível superior
+ * dentro de `xml`, respeitando o aninhamento (ex.: tabelas dentro de células).
+ */
+function findTopLevel(xml, tag) {
+    const re = new RegExp(`<(/?)w:${tag}(?=[\\s>/])[^>]*?(/?)>`, 'g');
+    const ranges = [];
+    let m, depth = 0, start = -1;
+    while ((m = re.exec(xml)) !== null) {
+        if (m[2] === '/') { // elemento auto-fechado
+            if (depth === 0) ranges.push({ start: m.index, end: re.lastIndex });
+            continue;
+        }
+        if (m[1] !== '/') {
+            if (depth === 0) start = m.index;
+            depth++;
+        } else {
+            depth--;
+            if (depth === 0) ranges.push({ start, end: re.lastIndex });
+        }
+    }
+    return ranges;
+}
+
 /**
  * Localiza as 13 tabelas de nível superior no document.xml
  */
 function findTopTables(xml) {
-    const tblRegex = /<w:tbl[\s>]/g;
-    const tblEndRegex = /<\/w:tbl>/g;
-    const tokens = [];
-    let m;
-    while ((m = tblRegex.exec(xml)) !== null) tokens.push({ type: 'start', pos: m.index });
-    while ((m = tblEndRegex.exec(xml)) !== null) tokens.push({ type: 'end', pos: m.index });
-    tokens.sort((a, b) => a.pos - b.pos);
-
-    const topTables = [];
-    let depth = 0, currentStart = 0;
-    tokens.forEach(t => {
-        if (t.type === 'start') {
-            if (depth === 0) currentStart = t.pos;
-            depth++;
-        } else {
-            depth--;
-            if (depth === 0) {
-                topTables.push({ start: currentStart, end: t.pos + '</w:tbl>'.length });
-            }
-        }
-    });
-    return topTables;
+    return findTopLevel(xml, 'tbl');
 }
 
 /**
- * Gera parágrafo formatado padrão Arial tamanho 10 (sz 20)
+ * Divide uma tabela em cabeçalho (<w:tbl> + tblPr + tblGrid) e linhas de nível superior.
+ * Preservar tblPr/tblGrid é obrigatório: sem eles o Word considera o arquivo corrompido.
  */
-function makeP(text, isBold = false, align = 'left', sz = 20) {
+function splitTable(tblXml) {
+    const rowRanges = findTopLevel(tblXml, 'tr');
+    const head = tblXml.substring(0, rowRanges.length ? rowRanges[0].start : tblXml.lastIndexOf('</w:tbl>'));
+    const rows = rowRanges.map(r => tblXml.substring(r.start, r.end));
+    return { head, rows };
+}
+
+function joinTable(head, rows) {
+    return head + rows.join('') + '</w:tbl>';
+}
+
+/** Remove identificadores w14 para evitar IDs duplicados ao clonar linhas do modelo. */
+function stripIds(xml) {
+    return xml.replace(/\s+w14:(?:paraId|textId)="[^"]*"/g, '');
+}
+
+/**
+ * Substitui o conteúdo da célula `cellIdx` de uma linha, preservando o <w:tcPr>
+ * original (larguras, mesclagens, bordas e sombreamento do modelo).
+ */
+function setCellContent(trXml, cellIdx, contentXml) {
+    const cells = findTopLevel(trXml, 'tc');
+    const c = cells[cellIdx];
+    if (!c) return trXml;
+    const cellXml = trXml.substring(c.start, c.end);
+    const prEnd = cellXml.indexOf('</w:tcPr>');
+    const prefix = prEnd !== -1
+        ? cellXml.substring(0, prEnd + '</w:tcPr>'.length)
+        : cellXml.substring(0, cellXml.indexOf('>') + 1);
+    // Toda célula precisa terminar com pelo menos um parágrafo
+    const body = contentXml && contentXml.includes('<w:p') ? contentXml : makeP('');
+    return trXml.substring(0, c.start) + prefix + body + '</w:tc>' + trXml.substring(c.end);
+}
+
+// --------------------------------------------------------------------------
+// Geradores de parágrafos e células
+// --------------------------------------------------------------------------
+
+/** Gera os runs de texto, convertendo quebras de linha em <w:br/>. */
+function makeRunContent(text) {
+    const lines = sanitizeText(text === null || text === undefined ? '' : text).split(/\r?\n/);
+    return lines.map(l => `<w:t xml:space="preserve">${escapeXml(l)}</w:t>`).join('<w:br/>');
+}
+
+/**
+ * Gera parágrafo formatado padrão Arial tamanho 10 (sz 20).
+ * Obs.: no <w:pPr> o <w:spacing> deve vir ANTES do <w:jc> (ordem exigida pelo schema OOXML).
+ */
+function makeP(text, isBold = false, align = 'left', sz = 20, compact = false) {
+    const spacingXml = compact
+        ? '<w:spacing w:after="0" w:line="240" w:lineRule="auto"/>'
+        : '<w:spacing w:before="40" w:after="40"/>';
     const jcXml = align === 'center' ? '<w:jc w:val="center"/>' : (align === 'right' ? '<w:jc w:val="right"/>' : '');
     const boldXml = isBold ? '<w:b/><w:bCs/>' : '';
-    return `<w:p><w:pPr>${jcXml}<w:spacing w:before="40" w:after="40"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/>${boldXml}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/></w:rPr></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/>${boldXml}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/></w:rPr><w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
+    const rPr = `<w:rPr>${FONT}${boldXml}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/></w:rPr>`;
+    return `<w:p><w:pPr>${spacingXml}${jcXml}${rPr}</w:pPr><w:r>${rPr}${makeRunContent(text)}</w:r></w:p>`;
+}
+
+/** Gera uma célula simples com largura fixa. */
+function makeTc(width, paragraphXml, vCenter = false) {
+    const vAlign = vCenter ? '<w:vAlign w:val="center"/>' : '';
+    return `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/>${vAlign}</w:tcPr>${paragraphXml}</w:tc>`;
+}
+
+function estrategiaChecks(estrategiaTipo) {
+    const st = (estrategiaTipo || '').toLowerCase();
+    const isPI = st.includes('integrador');
+    return {
+        sp: st.includes('problema') ? 'x' : ' ',
+        ec: st.includes('caso') ? 'x' : ' ',
+        pa: st.includes('pesquisa') ? 'x' : ' ',
+        pi: isPI ? 'x' : ' ',
+        proj: (st.includes('projeto') && !isPI) ? 'x' : ' '
+    };
+}
+
+function buildEstrategiaHeaderP(num, sa) {
+    const k = estrategiaChecks(sa.estrategiaTipo);
+    return makeP(`Estratégia de aprendizagem desafiadora - Bloco ${num}: ${sa.titulo || ''}    Situação-problema ( ${k.sp} ) Estudo de caso ( ${k.ec} ) Pesquisa Aplicada ( ${k.pa} ) Projeto ( ${k.proj} ) Integrador ( ${k.pi} )`, true);
+}
+
+function buildContextualizacaoPs(sa) {
+    return makeP(`Contextualização: Título: ${sa.contextualizacaoTitulo || sa.titulo || ''}`, true) +
+        makeP(sa.contextualizacao || '', false) +
+        makeP(`Observações para o docente: ${sa.observacoesDocente || ''}`, false) +
+        makeP(`Desafio: ${sa.desafio || ''}`, true) +
+        makeP(`Resultados esperados: ${sa.resultadosEsperados || ''}`, false);
 }
 
 /**
  * Compila e preenche o documento DOCX com base no plano fornecido
  */
 function compilePlanoDocx(plan, templatePath) {
-    const defaultTemplate = path.resolve(__dirname, '../_base-referencia/Planos Ensinos/MODELO PLANO DE ENSINO.docx');
+    const defaultTemplate = path.resolve(__dirname, '../template/plano-ensino/MODELO PLANO DE ENSINO.docx');
     const resolvedPath = templatePath || defaultTemplate;
 
     if (!fs.existsSync(resolvedPath)) {
@@ -136,266 +241,166 @@ function compilePlanoDocx(plan, templatePath) {
         throw new Error(`Estrutura do modelo inesperada: encontradas apenas ${topTables.length} tabelas no nível raiz.`);
     }
 
+    const tableXml = idx => xml.substring(topTables[idx].start, topTables[idx].end);
+
     // Processamos cada uma das 13 tabelas substituindo suas seções de dados
     // Vamos reconstruir o document.xml de trás para frente para manter os índices válidos
     const replacements = [];
+    const replaceTable = (idx, content) => replacements.push({ start: topTables[idx].start, end: topTables[idx].end, content });
 
     // --- TABELA 13: TABELA DE NÍVEIS DE DESEMPENHO (topTables[12]) ---
-    const niveis = calculateNiveisDesempenho(totalCrit, totalDesej);
-    let t13Xml = xml.substring(topTables[12].start, topTables[12].end);
-    const t13Rows = t13Xml.split('</w:tr>');
-    // Mantém as 2 primeiras linhas (Título e Cabeçalho de Colunas)
-    const t13Header = t13Rows.slice(0, 2).join('</w:tr>') + '</w:tr>';
-    let t13DataRows = '';
-    niveis.forEach(n => {
-        t13DataRows += `<w:tr><w:trPr><w:trHeight w:val="212"/></w:trPr>` +
-            `<w:tc><w:tcPr><w:tcW w:w="7650" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>` +
-            `<w:p><w:pPr><w:spacing w:before="60" w:after="60"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr>` +
-            `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>${escapeXml(n.crit)}</w:t></w:r></w:p></w:tc>` +
-            `<w:tc><w:tcPr><w:tcW w:w="1276" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>` +
-            `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0" w:line="240" w:lineRule="auto"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:b/><w:bCs/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr>` +
-            `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:b/><w:bCs/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>${n.nivel}</w:t></w:r></w:p></w:tc>` +
-            `<w:tc><w:tcPr><w:tcW w:w="1134" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>` +
-            `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="0" w:line="240" w:lineRule="auto"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:b/><w:bCs/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr>` +
-            `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:b/><w:bCs/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>${n.nota}</w:t></w:r></w:p></w:tc>` +
-            `</w:tr>`;
-    });
-    replacements.push({
-        start: topTables[12].start,
-        end: topTables[12].end,
-        content: t13Header + t13DataRows + '</w:tbl>'
-    });
-
-    // Helper para gerar linhas do Instrumento de Registro
-    function buildInstrumentoRows(sa, turma) {
-        if (!sa || !sa.criterios || sa.criterios.length === 0) return '';
-        let rowsHtml = '';
-        
-        sa.criterios.forEach(c => {
-            const isBold = c.tipo === 'C';
-            const capText = c.cap || '-';
-            const critText = c.crit || '-';
-
-            rowsHtml += `<w:tr><w:trPr><w:trHeight w:val="558"/></w:trPr>` +
-                // Col 1: Capacidade
-                `<w:tc><w:tcPr><w:tcW w:w="3261" w:type="dxa"/></w:tcPr>` +
-                `<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr>` +
-                `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>${escapeXml(capText)}</w:t></w:r></w:p></w:tc>` +
-                // Col 2: Critério de Avaliação (Crítico em Negrito)
-                `<w:tc><w:tcPr><w:tcW w:w="5245" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>` +
-                `<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/>${isBold ? '<w:b/><w:bCs/>' : ''}<w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr>` +
-                `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/>${isBold ? '<w:b/><w:bCs/>' : ''}<w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>${escapeXml(critText)}</w:t></w:r></w:p></w:tc>` +
-                // Col 3: Aluno (vazio)
-                `<w:tc><w:tcPr><w:tcW w:w="1134" w:type="dxa"/></w:tcPr>` +
-                `<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr></w:p></w:tc>` +
-                // Col 4: Professor (vazio)
-                `<w:tc><w:tcPr><w:tcW w:w="991" w:type="dxa"/></w:tcPr>` +
-                `<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr></w:p></w:tc>` +
-                `</w:tr>`;
-        });
-        return rowsHtml;
+    {
+        const niveis = calculateNiveisDesempenho(totalCrit, totalDesej);
+        const t = splitTable(tableXml(12));
+        // Mantém as 2 primeiras linhas (Título e Cabeçalho de Colunas)
+        const dataRows = niveis.map(n =>
+            `<w:tr><w:trPr><w:trHeight w:val="212"/></w:trPr>` +
+            makeTc(7650, makeP(n.crit, false, 'left', 20, false).replace('<w:spacing w:before="40" w:after="40"/>', '<w:spacing w:before="60" w:after="60"/>'), true) +
+            makeTc(1276, makeP(String(n.nivel), true, 'center', 20, true), true) +
+            makeTc(1134, makeP(String(n.nota), true, 'center', 20, true), true) +
+            `</w:tr>`
+        );
+        replaceTable(12, joinTable(t.head, [...t.rows.slice(0, 2), ...dataRows]));
     }
 
-    // Helper para gerar linhas da Tabela de Estratégias (5 colunas)
-    function buildEstrategiasRows(sa) {
-        if (!sa) return '';
-        const aulasStr = String(sa.aulas || '');
+    // Helper para gerar linhas do Instrumento de Registro
+    function buildInstrumentoRows(sa) {
+        if (!sa || !sa.criterios || sa.criterios.length === 0) return [];
+        return sa.criterios.map(c => {
+            const isBold = c.tipo === 'C';
+            return `<w:tr><w:trPr><w:trHeight w:val="558"/></w:trPr>` +
+                // Col 1: Capacidade
+                makeTc(3261, makeP(c.cap || '-', false, 'left', 20, true)) +
+                // Col 2: Critério de Avaliação (Crítico em Negrito)
+                makeTc(5245, makeP(c.crit || '-', isBold, 'left', 20, true), true) +
+                // Col 3: Aluno (vazio)
+                makeTc(1134, makeP('', false, 'left', 20, true)) +
+                // Col 4: Professor (vazio)
+                makeTc(991, makeP('', false, 'left', 20, true)) +
+                `</w:tr>`;
+        });
+    }
+
+    // Processa Instrumentos de Registro (Tabelas 3, 6, 9, 12 -> índices 2, 5, 8, 11)
+    [
+        { tblIdx: 2, sa: sa1 },
+        { tblIdx: 5, sa: sa2 },
+        { tblIdx: 8, sa: sa3 },
+        { tblIdx: 11, sa: sa4 }
+    ].forEach(cfg => {
+        if (!cfg.sa) return;
+        const t = splitTable(tableXml(cfg.tblIdx));
+        if (t.rows.length < 4) return;
+        let r2 = t.rows[1];
+        if (plan.turma) {
+            r2 = r2.replace(/Turma:\s*<\/w:t>/, () => `Turma: ${escapeXml(plan.turma)}</w:t>`);
+        }
+        const header = [t.rows[0], r2, t.rows[2], t.rows[3]];
+        replaceTable(cfg.tblIdx, joinTable(t.head, [...header, ...buildInstrumentoRows(cfg.sa)]));
+    });
+
+    // Processa Tabelas de Estratégias (Tabelas 2, 5, 8, 11 -> índices 1, 4, 7, 10)
+    // A tabela externa contém uma tabela aninhada de 5 colunas com o conteúdo real.
+    [
+        { tblIdx: 1, sa: sa1 },
+        { tblIdx: 4, sa: sa2 },
+        { tblIdx: 7, sa: sa3 },
+        { tblIdx: 10, sa: sa4 }
+    ].forEach(cfg => {
+        if (!cfg.sa) return;
+        const outerXml = tableXml(cfg.tblIdx);
+        const outer = splitTable(outerXml);
+        if (!outer.rows.length) return;
+        const outerRow = outer.rows[0];
+        const nestedRange = findTopLevel(outerRow, 'tbl')[0];
+        if (!nestedRange) return;
+        const nested = splitTable(outerRow.substring(nestedRange.start, nestedRange.end));
+        if (nested.rows.length < 3) return;
+
+        const sa = cfg.sa;
         const capList = [...(sa.capacidadesTecnicas || []), ...(sa.capacidadesSocioemocionais || [])].join('; ');
         const conList = (sa.conhecimentos || []).join('; ');
         const estStr = `Estratégias: ${sa.estrategiasEnsino || sa.estrategiaTipo || ''}\nAvaliação: ${sa.instrumentosAvaliacao || ''}`;
         const recStr = `Recursos e Ambientes: ${sa.recursos || ''}`;
 
-        return `<w:tr><w:trPr><w:trHeight w:val="484"/></w:trPr>` +
-            // Col 1: Nº horas / aulas
-            `<w:tc><w:tcPr><w:tcW w:w="895" w:type="dxa"/><w:tcBorders><w:top w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:left w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:bottom w:val="dotted" w:sz="4" w:space="0" w:color="000000"/><w:right w:val="dotted" w:sz="4" w:space="0" w:color="000000"/></w:tcBorders></w:tcPr>` +
-            `<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr>` +
-            `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>${escapeXml(aulasStr)}</w:t></w:r></w:p></w:tc>` +
-            // Col 2: Capacidades a serem trabalhadas
-            `<w:tc><w:tcPr><w:tcW w:w="3660" w:type="dxa"/><w:tcBorders><w:top w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:left w:val="dotted" w:sz="4" w:space="0" w:color="000000"/><w:bottom w:val="dotted" w:sz="4" w:space="0" w:color="000000"/><w:right w:val="dotted" w:sz="4" w:space="0" w:color="000000"/></w:tcBorders></w:tcPr>` +
-            `<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr>` +
-            `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>${escapeXml(capList)}</w:t></w:r></w:p></w:tc>` +
-            // Col 3: Conhecimentos relacionados
-            `<w:tc><w:tcPr><w:tcW w:w="4678" w:type="dxa"/><w:tcBorders><w:top w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:left w:val="dotted" w:sz="4" w:space="0" w:color="000000"/><w:bottom w:val="dotted" w:sz="4" w:space="0" w:color="000000"/><w:right w:val="dotted" w:sz="4" w:space="0" w:color="000000"/></w:tcBorders></w:tcPr>` +
-            `<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr>` +
-            `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>${escapeXml(conList)}</w:t></w:r></w:p></w:tc>` +
-            // Col 4: Estratégias de ensino e instrumentos de avaliação
-            `<w:tc><w:tcPr><w:tcW w:w="3402" w:type="dxa"/><w:tcBorders><w:top w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:left w:val="dotted" w:sz="4" w:space="0" w:color="000000"/><w:bottom w:val="dotted" w:sz="4" w:space="0" w:color="000000"/><w:right w:val="dotted" w:sz="4" w:space="0" w:color="000000"/></w:tcBorders></w:tcPr>` +
-            `<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr>` +
-            `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>${escapeXml(estStr)}</w:t></w:r></w:p></w:tc>` +
-            // Col 5: Recursos e ambientes pedagógicos
-            `<w:tc><w:tcPr><w:tcW w:w="2017" w:type="dxa"/><w:tcBorders><w:top w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:left w:val="dotted" w:sz="4" w:space="0" w:color="000000"/><w:bottom w:val="dotted" w:sz="4" w:space="0" w:color="000000"/><w:right w:val="single" w:sz="12" w:space="0" w:color="000000"/></w:tcBorders></w:tcPr>` +
-            `<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr>` +
-            `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>${escapeXml(recStr)}</w:t></w:r></w:p></w:tc>` +
-            `</w:tr>`;
-    }
+        // Clona a primeira linha vazia do modelo (preserva bordas/larguras) e preenche as 5 colunas
+        let dataRow = stripIds(nested.rows[2]);
+        dataRow = setCellContent(dataRow, 0, makeP(String(sa.aulas || ''), false, 'center', 20, true));
+        dataRow = setCellContent(dataRow, 1, makeP(capList, false, 'left', 20, true));
+        dataRow = setCellContent(dataRow, 2, makeP(conList, false, 'left', 20, true));
+        dataRow = setCellContent(dataRow, 3, makeP(estStr, false, 'left', 20, true));
+        dataRow = setCellContent(dataRow, 4, makeP(recStr, false, 'left', 20, true));
 
-    // Processa Instrumentos de Registro (Tabelas 3, 6, 9, 12 -> índices 2, 5, 8, 11)
-    const instConfigs = [
-        { tblIdx: 2, sa: sa1 },
-        { tblIdx: 5, sa: sa2 },
-        { tblIdx: 8, sa: sa3 },
-        { tblIdx: 11, sa: sa4 }
-    ];
-
-    instConfigs.forEach(cfg => {
-        if (cfg.sa) {
-            let tXml = xml.substring(topTables[cfg.tblIdx].start, topTables[cfg.tblIdx].end);
-            const rows = tXml.split('</w:tr>');
-            let r2 = rows[1];
-            if (plan.turma) {
-                r2 = r2.replace(/Turma:\s*<\/w:t>/, `Turma: ${escapeXml(plan.turma)}</w:t>`);
-            }
-            const headerRows = [rows[0], r2, rows[2], rows[3]].join('</w:tr>') + '</w:tr>';
-            const dataRows = buildInstrumentoRows(cfg.sa, plan.turma);
-            replacements.push({
-                start: topTables[cfg.tblIdx].start,
-                end: topTables[cfg.tblIdx].end,
-                content: headerRows + dataRows + '</w:tbl>'
-            });
-        }
-    });
-
-    // Processa Tabelas de Estratégias (Tabelas 2, 5, 8, 11 -> índices 1, 4, 7, 10)
-    const estConfigs = [
-        { tblIdx: 1, sa: sa1 },
-        { tblIdx: 4, sa: sa2 },
-        { tblIdx: 7, sa: sa3 },
-        { tblIdx: 10, sa: sa4 }
-    ];
-
-    estConfigs.forEach(cfg => {
-        if (cfg.sa) {
-            let tXml = xml.substring(topTables[cfg.tblIdx].start, topTables[cfg.tblIdx].end);
-            const innerStart = tXml.indexOf('<w:tbl', 10);
-            const innerEnd = tXml.lastIndexOf('</w:tbl>');
-            if (innerStart !== -1 && innerEnd !== -1) {
-                const preInner = tXml.substring(0, innerStart);
-                const postInner = tXml.substring(innerEnd + '</w:tbl>'.length);
-                const innerTbl = tXml.substring(innerStart, innerEnd + '</w:tbl>'.length);
-                const rows = innerTbl.split('</w:tr>');
-                const header = rows.slice(0, 2).join('</w:tr>') + '</w:tr>';
-                const dataRow = buildEstrategiasRows(cfg.sa);
-                const newInner = header + dataRow + '</w:tbl>';
-                replacements.push({
-                    start: topTables[cfg.tblIdx].start,
-                    end: topTables[cfg.tblIdx].end,
-                    content: preInner + newInner + postInner
-                });
-            }
-        }
+        const newNested = joinTable(nested.head, [nested.rows[0], nested.rows[1], dataRow]);
+        const newOuterRow = outerRow.substring(0, nestedRange.start) + newNested + outerRow.substring(nestedRange.end);
+        replaceTable(cfg.tblIdx, joinTable(outer.head, [newOuterRow, ...outer.rows.slice(1)]));
     });
 
     // Processa Contextos das SAs (Tabelas 4, 7, 10 -> índices 3, 6, 9 para SA2, SA3, SA4)
-    const ctxConfigs = [
+    [
         { tblIdx: 3, sa: sa2, num: 2 },
         { tblIdx: 6, sa: sa3, num: 3 },
         { tblIdx: 9, sa: sa4, num: 4 }
-    ];
-
-    ctxConfigs.forEach(cfg => {
-        if (cfg.sa) {
-            let tXml = xml.substring(topTables[cfg.tblIdx].start, topTables[cfg.tblIdx].end);
-            const rows = tXml.split('</w:tr>');
-            if (rows.length >= 3) {
-                const st = (cfg.sa.estrategiaTipo || '').toLowerCase();
-                const isSP = st.includes('problema') ? 'x' : ' ';
-                const isEC = st.includes('caso') ? 'x' : ' ';
-                const isPA = st.includes('pesquisa') ? 'x' : ' ';
-                const isPI = st.includes('integrador') ? 'x' : ' ';
-                const isProj = (st.includes('projeto') && !isPI) ? 'x' : ' ';
-
-                const r1Text = `Estratégia de aprendizagem desafiadora - Bloco ${cfg.num}: ${cfg.sa.titulo || ''}    Situação-problema ( ${isSP} ) Estudo de caso ( ${isEC} ) Pesquisa Aplicada ( ${isPA} ) Projeto ( ${isProj} ) Integrador ( ${isPI} )`;
-                const r1 = `<w:tr><w:tc><w:tcPr><w:tcW w:w="9923" w:type="dxa"/><w:gridSpan w:val="2"/></w:tcPr>${makeP(r1Text, true)}</w:tc></w:tr>`;
-
-                const r2P1 = makeP(`Contextualização: Título: ${cfg.sa.contextualizacaoTitulo || cfg.sa.titulo || ''}`, true);
-                const r2P2 = makeP(cfg.sa.contextualizacao || '', false);
-                const r2P3 = makeP(`Observações para o docente: ${cfg.sa.observacoesDocente || ''}`, false);
-                const r2P4 = makeP(`Desafio: ${cfg.sa.desafio || ''}`, true);
-                const r2P5 = makeP(`Resultados esperados: ${cfg.sa.resultadosEsperados || ''}`, false);
-                const r2 = `<w:tr><w:tc><w:tcPr><w:tcW w:w="9923" w:type="dxa"/><w:gridSpan w:val="2"/></w:tcPr>${r2P1}${r2P2}${r2P3}${r2P4}${r2P5}</w:tc></w:tr>`;
-
-                const r3 = rows[2] + '</w:tr>';
-                replacements.push({
-                    start: topTables[cfg.tblIdx].start,
-                    end: topTables[cfg.tblIdx].end,
-                    content: `<w:tbl>${r1}${r2}${r3}</w:tbl>`
-                });
-            }
-        }
+    ].forEach(cfg => {
+        if (!cfg.sa) return;
+        const t = splitTable(tableXml(cfg.tblIdx));
+        if (t.rows.length < 3) return;
+        const rows = [...t.rows];
+        rows[0] = setCellContent(rows[0], 0, buildEstrategiaHeaderP(cfg.num, cfg.sa));
+        rows[1] = setCellContent(rows[1], 0, buildContextualizacaoPs(cfg.sa));
+        replaceTable(cfg.tblIdx, joinTable(t.head, rows));
     });
 
     // Processa Tabela 1 (Header Geral + Contexto SA 1)
-    let t1Xml = xml.substring(topTables[0].start, topTables[0].end);
-    const t1Rows = t1Xml.split('</w:tr>');
-    if (t1Rows.length >= 11) {
-        const r1 = t1Rows[0] + '</w:tr>';
-        const r2 = `<w:tr><w:tc><w:tcPr><w:tcW w:w="9923" w:type="dxa"/><w:gridSpan w:val="2"/></w:tcPr>${makeP(`Curso: ${plan.curso || ''}`, true)}</w:tc></w:tr>`;
-        const r3 = `<w:tr><w:tc><w:tcPr><w:tcW w:w="9923" w:type="dxa"/><w:gridSpan w:val="2"/></w:tcPr>${makeP(`Unidade curricular (UC): ${plan.unidade || plan.curso || ''}`, true)}</w:tc></w:tr>`;
-        
-        const chStr = `Carga horária da UC: ${plan.cargaHoraria || 0} horas`;
-        const naStr = `Nº de aulas: ${plan.numAulas || (plan.cargaHoraria ? `${plan.cargaHoraria} aulas` : '')}`;
-        const r4 = `<w:tr><w:tc><w:tcPr><w:tcW w:w="4961" w:type="dxa"/></w:tcPr>${makeP(chStr, true)}</w:tc><w:tc><w:tcPr><w:tcW w:w="4962" w:type="dxa"/></w:tcPr>${makeP(naStr, true)}</w:tc></w:tr>`;
+    {
+        const t = splitTable(tableXml(0));
+        if (t.rows.length >= 12) {
+            const rows = [...t.rows];
+            rows[1] = setCellContent(rows[1], 0, makeP(`Curso: ${plan.curso || ''}`, true));
+            rows[2] = setCellContent(rows[2], 0, makeP(`Unidade curricular (UC): ${plan.unidade || plan.curso || ''}`, true));
 
-        let saHoursText = 'Carga horária prevista para o desenvolvimento da Situação de Aprendizagem :';
-        situacoes.forEach((sa, idx) => {
-            const h = sa.cargaHoraria || (sa.aulas ? Math.round((sa.aulas * 45) / 60) : 0);
-            saHoursText += `\n◦ Situação de Aprendizagem 0${idx + 1}: ${h} horas (${sa.aulas || 0} aulas).`;
-        });
-        const r5Ps = saHoursText.split('\n').map((line, li) => makeP(line, li === 0));
-        const r5 = `<w:tr><w:tc><w:tcPr><w:tcW w:w="9923" w:type="dxa"/><w:gridSpan w:val="2"/></w:tcPr>${r5Ps.join('')}</w:tc></w:tr>`;
+            const chStr = `Carga horária da UC: ${plan.cargaHoraria || 0} horas`;
+            const naStr = `Nº de aulas: ${plan.numAulas || (plan.cargaHoraria ? `${plan.cargaHoraria} aulas` : '')}`;
+            rows[3] = setCellContent(rows[3], 0, makeP(chStr, true));
+            rows[3] = setCellContent(rows[3], 1, makeP(naStr, true));
 
-        const r6 = `<w:tr><w:tc><w:tcPr><w:tcW w:w="9923" w:type="dxa"/><w:gridSpan w:val="2"/></w:tcPr>${makeP(`Objetivo da UC: ${plan.objetivoUC || 'Desenvolver capacidades técnicas e socioemocionais relativas à área de atuação.'}`, false)}</w:tc></w:tr>`;
-
-        const isBasicas = (plan.capacidadesBasicas && plan.capacidadesBasicas.length > 0) ? 'x' : ' ';
-        const isTecnicas = (plan.capacidadesTecnicas && plan.capacidadesTecnicas.length > 0) ? 'x' : 'x';
-        const isSocio = (plan.capacidadesSocioemocionais && plan.capacidadesSocioemocionais.length > 0) ? 'x' : 'x';
-        const r7Text = `Capacidades a serem desenvolvidas: Básicas ( ${isBasicas} ) Técnicas ( ${isTecnicas} ) Socioemocionais ( ${isSocio} )`;
-        const r7 = `<w:tr><w:tc><w:tcPr><w:tcW w:w="9923" w:type="dxa"/><w:gridSpan w:val="2"/></w:tcPr>${makeP(r7Text, true)}</w:tc></w:tr>`;
-
-        const capLines = [];
-        let capCounter = 1;
-        (plan.capacidadesTecnicas || []).forEach(c => {
-            capLines.push(`${capCounter++}. ${c}`);
-        });
-        if (plan.capacidadesSocioemocionais && plan.capacidadesSocioemocionais.length > 0) {
-            capLines.push('Capacidades Socioemocionais:');
-            let socioCounter = 1;
-            plan.capacidadesSocioemocionais.forEach(s => {
-                capLines.push(`${socioCounter++}. ${s}`);
+            const saHoursLines = ['Carga horária prevista para o desenvolvimento da Situação de Aprendizagem :'];
+            situacoes.forEach((sa, idx) => {
+                const h = sa.cargaHoraria || (sa.aulas ? Math.round((sa.aulas * 45) / 60) : 0);
+                saHoursLines.push(`◦ Situação de Aprendizagem 0${idx + 1}: ${h} horas (${sa.aulas || 0} aulas).`);
             });
+            rows[4] = setCellContent(rows[4], 0, saHoursLines.map((line, li) => makeP(line, li === 0)).join(''));
+
+            rows[5] = setCellContent(rows[5], 0, makeP(`Objetivo da UC: ${plan.objetivoUC || 'Desenvolver capacidades técnicas e socioemocionais relativas à área de atuação.'}`, false));
+
+            const isBasicas = (plan.capacidadesBasicas && plan.capacidadesBasicas.length > 0) ? 'x' : ' ';
+            const isTecnicas = 'x';
+            const isSocio = 'x';
+            rows[6] = setCellContent(rows[6], 0, makeP(`Capacidades a serem desenvolvidas: Básicas ( ${isBasicas} ) Técnicas ( ${isTecnicas} ) Socioemocionais ( ${isSocio} )`, true));
+
+            const capLines = [];
+            let capCounter = 1;
+            (plan.capacidadesTecnicas || []).forEach(c => {
+                capLines.push(`${capCounter++}. ${c}`);
+            });
+            if (plan.capacidadesSocioemocionais && plan.capacidadesSocioemocionais.length > 0) {
+                capLines.push('Capacidades Socioemocionais:');
+                let socioCounter = 1;
+                plan.capacidadesSocioemocionais.forEach(s => {
+                    capLines.push(`${socioCounter++}. ${s}`);
+                });
+            }
+            rows[7] = setCellContent(rows[7], 0, capLines.map(line => makeP(line, line.startsWith('Capacidades Socioemocionais'))).join(''));
+
+            const conLines = ['Conhecimentos:', ...(plan.conhecimentos || [])];
+            rows[8] = setCellContent(rows[8], 0, conLines.map((l, li) => makeP(l, li === 0)).join(''));
+
+            rows[9] = setCellContent(rows[9], 0, buildEstrategiaHeaderP(1, sa1));
+            rows[10] = setCellContent(rows[10], 0, buildContextualizacaoPs(sa1));
+            // rows[0] (título) e rows[11] (Anexos) permanecem como no modelo
+
+            replaceTable(0, joinTable(t.head, rows));
         }
-        const r8Ps = capLines.map(line => makeP(line, line.startsWith('Capacidades Socioemocionais')));
-        const r8 = `<w:tr><w:tc><w:tcPr><w:tcW w:w="9923" w:type="dxa"/><w:gridSpan w:val="2"/></w:tcPr>${r8Ps.join('')}</w:tc></w:tr>`;
-
-        const conLines = ['Conhecimentos:'];
-        (plan.conhecimentos || []).forEach(k => conLines.push(k));
-        const r9Ps = conLines.map((l, li) => makeP(l, li === 0));
-        const r9 = `<w:tr><w:tc><w:tcPr><w:tcW w:w="9923" w:type="dxa"/><w:gridSpan w:val="2"/></w:tcPr>${r9Ps.join('')}</w:tc></w:tr>`;
-
-        const st1 = (sa1.estrategiaTipo || '').toLowerCase();
-        const isSP1 = st1.includes('problema') ? 'x' : ' ';
-        const isEC1 = st1.includes('caso') ? 'x' : ' ';
-        const isPA1 = st1.includes('pesquisa') ? 'x' : ' ';
-        const isPI1 = st1.includes('integrador') ? 'x' : ' ';
-        const isProj1 = (st1.includes('projeto') && !isPI1) ? 'x' : ' ';
-        const r10Text = `Estratégia de aprendizagem desafiadora - Bloco 1: ${sa1.titulo || ''}    Situação-problema ( ${isSP1} ) Estudo de caso ( ${isEC1} ) Pesquisa Aplicada ( ${isPA1} ) Projeto ( ${isProj1} ) Integrador ( ${isPI1} )`;
-        const r10 = `<w:tr><w:tc><w:tcPr><w:tcW w:w="9923" w:type="dxa"/><w:gridSpan w:val="2"/></w:tcPr>${makeP(r10Text, true)}</w:tc></w:tr>`;
-
-        const r11P1 = makeP(`Contextualização: Título: ${sa1.contextualizacaoTitulo || sa1.titulo || ''}`, true);
-        const r11P2 = makeP(sa1.contextualizacao || '', false);
-        const r11P3 = makeP(`Observações para o docente: ${sa1.observacoesDocente || ''}`, false);
-        const r11P4 = makeP(`Desafio: ${sa1.desafio || ''}`, true);
-        const r11P5 = makeP(`Resultados esperados: ${sa1.resultadosEsperados || ''}`, false);
-        const r11 = `<w:tr><w:tc><w:tcPr><w:tcW w:w="9923" w:type="dxa"/><w:gridSpan w:val="2"/></w:tcPr>${r11P1}${r11P2}${r11P3}${r11P4}${r11P5}</w:tc></w:tr>`;
-
-        const r12 = t1Rows[t1Rows.length - 2] + '</w:tr>';
-
-        const newT1 = `<w:tbl>${r1}${r2}${r3}${r4}${r5}${r6}${r7}${r8}${r9}${r10}${r11}${r12}</w:tbl>`;
-        replacements.push({
-            start: topTables[0].start,
-            end: topTables[0].end,
-            content: newT1
-        });
     }
 
     // Aplica substituições em ordem decrescente de índice
