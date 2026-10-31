@@ -1,7 +1,6 @@
 // ==============================================================================
 // DOCENTE SENAI - COMPILADOR OFICIAL DOCX (PLANO DE ENSINO MSEP)
-// Gera dinamicamente o Plano de Ensino idêntico à Pré-visualização / Impressão PDF
-// Padrão institucional SENAI-SP com desafios, quadro de 5 colunas e rubricas IRRAC
+// Padrão Institucional SENAI-SP: Book MSEP Digital e Matriz de Avaliação IRRAC
 // ==============================================================================
 
 const path = require('path');
@@ -23,7 +22,10 @@ const {
     ShadingType
 } = require('docx');
 
-// Limpeza de caracteres não suportados pelo XML do Word
+/**
+ * Remove caracteres de controle proibidos pelo XML do Word
+ * e limpa espaçamentos extras.
+ */
 function sanitize(val) {
     if (val === null || val === undefined) return '';
     return String(val)
@@ -31,6 +33,9 @@ function sanitize(val) {
         .trim();
 }
 
+/**
+ * Remove prefixos redundantes do título da SA (ex: "Situação de Aprendizagem 01 - ", "SA 1: ")
+ */
 function cleanSaTitle(rawTitle) {
     if (!rawTitle) return '';
     let title = String(rawTitle).trim();
@@ -42,8 +47,12 @@ function cleanSaTitle(rawTitle) {
 }
 
 /**
- * Calcula os 10 níveis oficiais de desempenho (10 a 1) e notas (100 a 10)
- * de acordo com a diretriz do SENAI-SP.
+ * Calcula a tabela oficial de 10 Níveis de Desempenho (10 a 1) e conversão em notas (100 a 10)
+ * rigorosamente conforme as diretrizes do SENAI-SP (Prompt 07 e documentos oficiais MSEP):
+ * - Nível 10: 100% Críticos + 100% Desejáveis -> 100
+ * - Níveis 9 a 6: 100% Críticos + decréscimo de Desejáveis -> 95, 85, 75, 60
+ * - Nível 5: 100% Críticos + 0 Desejáveis -> 50 (patamar de aprovação)
+ * - Níveis 4 a 1: Fração de Críticos + 0 Desejáveis -> 40, 30, 20, 10
  */
 function calculateNiveisDesempenho(totalCrit, totalDesej) {
     const C = Math.max(0, totalCrit || 0);
@@ -74,7 +83,7 @@ function calculateNiveisDesempenho(totalCrit, totalDesej) {
     ];
 }
 
-// Estilo de bordas padrão para tabelas institucionais SENAI
+// Estilo de bordas oficiais para documentos institucionais SENAI-SP
 const BORDER_BLACK = { style: BorderStyle.SINGLE, size: 4, color: "000000" };
 const TABLE_BORDERS = {
     top: BORDER_BLACK,
@@ -140,16 +149,36 @@ function createBulletList(items, emptyText = '-') {
 }
 
 /**
- * Compila o plano em formato DOCX oficial SENAI-SP
+ * Compila o plano em formato DOCX oficial SENAI-SP garantindo total aderência às diretrizes
+ * institucionais (Book MSEP Digital e Matriz de Critérios IRRAC)
  */
 async function compilePlanoDocx(plan) {
     if (!plan) throw new Error('Dados do plano não fornecidos');
 
-    const situacoes = Array.isArray(plan.situacoes) ? plan.situacoes : [];
-    const escola = sanitize(plan.escola) || 'ESCOLA SENAI';
-    const curso = sanitize(plan.curso) || 'Curso';
-    const unidade = sanitize(plan.unidade) || curso;
-    const cargaHoraria = parseInt(plan.cargaHoraria) || 40;
+    const rawSituacoes = Array.isArray(plan.situacoes) ? plan.situacoes : [];
+    const situacoes = rawSituacoes.length > 0 ? rawSituacoes : [
+        {
+            numero: "01",
+            titulo: "Situação de Aprendizagem Prática",
+            aulas: parseInt(plan.cargaHoraria) || 40,
+            estrategiaTipo: "Situação-problema",
+            capacidadesTecnicas: plan.capacidadesTecnicas || [],
+            capacidadesSocioemocionais: plan.capacidadesSocioemocionais || [],
+            conhecimentos: plan.conhecimentos || [],
+            contextualizacao: "Cenário prático industrial relativo à unidade curricular.",
+            desafio: "Solucionar os desafios técnicos propostos.",
+            resultadosEsperados: "Entregas validadas conforme critérios de desempenho.",
+            criterios: [
+                { cap: "Capacidade técnica fundamental", crit: "Executa os procedimentos técnicos com exatidão.", tipo: "C" },
+                { cap: "Capacidade técnica fundamental", crit: "Aplica normas de qualidade e segurança.", tipo: "D" }
+            ]
+        }
+    ];
+
+    const escola = sanitize(plan.escola) || 'ESCOLA SENAI "MARIANO FERRAZ"';
+    const curso = sanitize(plan.curso || plan.courseName) || 'Curso SENAI';
+    const unidade = sanitize(plan.unidade || plan.courseUnit) || curso;
+    const cargaHoraria = parseInt(plan.cargaHoraria || plan.workload) || 40;
     const numAulas = sanitize(plan.numAulas) || `${cargaHoraria} aulas`;
     const objetivoUC = sanitize(plan.objetivoUC) || 'Desenvolver capacidades técnicas e socioemocionais relativas à área de atuação.';
     const turma = sanitize(plan.turma) || '___________________';
@@ -160,10 +189,11 @@ async function compilePlanoDocx(plan) {
         fic: 'Formação Inicial e Continuada (FIC)',
         superior: 'Ensino Superior (Graduação / Tecnologia)'
     };
-    const tipoLabel = tipoLabels[plan.cursoTipo] || 'Curso Técnico';
+    const activeTipo = plan.cursoTipo || 'tecnico';
+    const tipoLabel = tipoLabels[activeTipo] || 'Curso Técnico';
     const modalidadeLabel = (plan.modalidade === 'semipresencial') ? 'Semipresencial (com EaD)' : '100% Presencial';
 
-    // Logo oficial SENAI-SP
+    // Logotipo oficial SENAI São Paulo
     let logoRun = null;
     const logoCandidates = [
         path.resolve(__dirname, '../public/senai-logo.png'),
@@ -186,7 +216,7 @@ async function compilePlanoDocx(plan) {
 
     const docElements = [];
 
-    // --- CABEÇALHO INSTITUCIONAL ---
+    // --- 1. CABEÇALHO INSTITUCIONAL OFICIAL ---
     if (logoRun) {
         docElements.push(new Paragraph({
             alignment: AlignmentType.CENTER,
@@ -207,7 +237,7 @@ async function compilePlanoDocx(plan) {
         children: [new TextRun({ text: "PLANO DE ENSINO", bold: true, size: 22 })]
     }));
 
-    // Faixa preta: SITUAÇÃO DE APRENDIZAGEM
+    // Faixa preta oficial: SITUAÇÃO DE APRENDIZAGEM
     docElements.push(new Table({
         width: { size: 100, type: WidthType.PERCENTAGE },
         borders: TABLE_BORDERS,
@@ -232,7 +262,7 @@ async function compilePlanoDocx(plan) {
     // Espaçador
     docElements.push(new Paragraph({ spacing: { before: 40, after: 40 } }));
 
-    // --- TABELA 1: DADOS GERAIS DO CURSO E DA UC ---
+    // --- 2. TABELA 1: DADOS GERAIS DO CURSO E DA UC ---
     const saHoursParagraphs = [
         new Paragraph({
             spacing: { before: 20, after: 20, line: 240 },
@@ -241,12 +271,13 @@ async function compilePlanoDocx(plan) {
             ]
         })
     ];
-    situacoes.forEach(sa => {
+    situacoes.forEach((sa, idx) => {
+        const num = sa.numero || (idx + 1 < 10 ? `0${idx + 1}` : `${idx + 1}`);
         const h = sa.cargaHoraria || (sa.aulas ? Math.round((sa.aulas * 45) / 60) : 0);
         saHoursParagraphs.push(new Paragraph({
             spacing: { before: 10, after: 10, line: 240 },
             children: [
-                new TextRun({ text: `◦ Situação de Aprendizagem ${sa.numero || '01'}: ${h} horas (${sa.aulas || 0} aulas).`, size: 19 })
+                new TextRun({ text: `◦ Situação de Aprendizagem ${num}: ${h} horas (${sa.aulas || 0} aulas).`, size: 19 })
             ]
         }));
     });
@@ -343,18 +374,18 @@ async function compilePlanoDocx(plan) {
     });
     docElements.push(table1);
 
-    // --- SEÇÕES DE CADA SITUAÇÃO DE APRENDIZAGEM ---
+    // --- 3. SEÇÕES INDIVIDUAIS DE CADA SITUAÇÃO DE APRENDIZAGEM ---
     situacoes.forEach((sa, idx) => {
-        const saNum = sa.numero || `0${idx + 1}`;
+        const saNum = sa.numero || (idx + 1 < 10 ? `0${idx + 1}` : `${idx + 1}`);
         const saCleanTitle = cleanSaTitle(sa.titulo);
         const titleSuffix = saCleanTitle ? ` - ${saCleanTitle}` : '';
 
-        // Quebra de página antes de cada SA (exceto primeira)
+        // Quebra de página para manter cada SA organizada e legível
         docElements.push(new Paragraph({
             children: [new PageBreak()]
         }));
 
-        // Título da SA
+        // Título da Situação de Aprendizagem
         docElements.push(new Paragraph({
             alignment: AlignmentType.LEFT,
             spacing: { before: 100, after: 60 },
@@ -367,54 +398,73 @@ async function compilePlanoDocx(plan) {
             ]
         }));
 
-        // Tabela: Capacidades e Conhecimentos da SA
-        const capTecList = createBulletList(sa.capacidadesTecnicas);
-        const capSocioList = createBulletList(sa.capacidadesSocioemocionais);
-        const conList = createBulletList(sa.conhecimentos);
+        // Tabela de Capacidades e Conhecimentos da SA
+        const capBasicas = Array.isArray(sa.capacidadesBasicas) ? sa.capacidadesBasicas : [];
+        const capTecnicas = Array.isArray(sa.capacidadesTecnicas) ? sa.capacidadesTecnicas : [];
+        const capSocio = Array.isArray(sa.capacidadesSocioemocionais) ? sa.capacidadesSocioemocionais : [];
+        const conhecimentos = Array.isArray(sa.conhecimentos) ? sa.conhecimentos : [];
+
+        const capRows = [];
+
+        if (capBasicas.length > 0) {
+            capRows.push(new TableRow({
+                children: [
+                    createCell([
+                        new Paragraph({
+                            spacing: { before: 20, after: 20 },
+                            children: [new TextRun({ text: "Capacidades Básicas:", bold: true, size: 19 })]
+                        }),
+                        ...createBulletList(capBasicas)
+                    ])
+                ]
+            }));
+        }
+
+        capRows.push(new TableRow({
+            children: [
+                createCell([
+                    new Paragraph({
+                        spacing: { before: 20, after: 20 },
+                        children: [new TextRun({ text: "Capacidades Técnicas:", bold: true, size: 19 })]
+                    }),
+                    ...createBulletList(capTecnicas)
+                ])
+            ]
+        }));
+
+        capRows.push(new TableRow({
+            children: [
+                createCell([
+                    new Paragraph({
+                        spacing: { before: 20, after: 20 },
+                        children: [new TextRun({ text: "Capacidades Socioemocionais:", bold: true, size: 19 })]
+                    }),
+                    ...createBulletList(capSocio)
+                ])
+            ]
+        }));
+
+        capRows.push(new TableRow({
+            children: [
+                createCell([
+                    new Paragraph({
+                        spacing: { before: 20, after: 20 },
+                        children: [new TextRun({ text: "Conhecimentos Relacionados:", bold: true, size: 19 })]
+                    }),
+                    ...createBulletList(conhecimentos)
+                ])
+            ]
+        }));
 
         const tblCapCon = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             borders: TABLE_BORDERS,
-            rows: [
-                new TableRow({
-                    children: [
-                        createCell([
-                            new Paragraph({
-                                spacing: { before: 20, after: 20 },
-                                children: [new TextRun({ text: "Capacidades Técnicas:", bold: true, size: 19 })]
-                            }),
-                            ...capTecList
-                        ])
-                    ]
-                }),
-                new TableRow({
-                    children: [
-                        createCell([
-                            new Paragraph({
-                                spacing: { before: 20, after: 20 },
-                                children: [new TextRun({ text: "Capacidades Socioemocionais:", bold: true, size: 19 })]
-                            }),
-                            ...capSocioList
-                        ])
-                    ]
-                }),
-                new TableRow({
-                    children: [
-                        createCell([
-                            new Paragraph({
-                                spacing: { before: 20, after: 20 },
-                                children: [new TextRun({ text: "Conhecimentos Relacionados:", bold: true, size: 19 })]
-                            }),
-                            ...conList
-                        ])
-                    ]
-                })
-            ]
+            rows: capRows
         });
         docElements.push(tblCapCon);
         docElements.push(new Paragraph({ spacing: { before: 40, after: 40 } }));
 
-        // Tabela: Estrutura da Situação de Aprendizagem (Contextualização, Desafio, etc.)
+        // Tabela de Estrutura da Situação de Aprendizagem (Contexto, Desafio, etc.)
         const ctxParagraphs = [
             new Paragraph({
                 spacing: { before: 20, after: 20 },
@@ -507,7 +557,7 @@ async function compilePlanoDocx(plan) {
         docElements.push(tblEstrutura);
         docElements.push(new Paragraph({ spacing: { before: 60, after: 40 } }));
 
-        // Título: ESTRATÉGIAS DE ENSINO (5 colunas)
+        // Título oficial: ESTRATÉGIAS DE ENSINO (5 colunas MSEP)
         docElements.push(new Paragraph({
             spacing: { before: 60, after: 40 },
             children: [
@@ -519,7 +569,7 @@ async function compilePlanoDocx(plan) {
             ]
         }));
 
-        const capListAll = [...(sa.capacidadesTecnicas || []), ...(sa.capacidadesSocioemocionais || [])];
+        const capListAll = [...capBasicas, ...capTecnicas, ...capSocio];
         const tbl5Cols = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             borders: TABLE_BORDERS,
@@ -537,7 +587,7 @@ async function compilePlanoDocx(plan) {
                     children: [
                         createCell(createParagraph(`${sa.aulas || 0} aulas`, { bold: true, size: 19, alignment: AlignmentType.CENTER }), { width: 12 }),
                         createCell(createBulletList(capListAll), { width: 25 }),
-                        createCell(createBulletList(sa.conhecimentos), { width: 25 }),
+                        createCell(createBulletList(conhecimentos), { width: 25 }),
                         createCell([
                             new Paragraph({
                                 spacing: { before: 10, after: 5 },
@@ -564,7 +614,7 @@ async function compilePlanoDocx(plan) {
         docElements.push(tbl5Cols);
         docElements.push(new Paragraph({ spacing: { before: 60, after: 40 } }));
 
-        // Título: INSTRUMENTO DE REGISTRO
+        // Título oficial: INSTRUMENTO DE REGISTRO
         docElements.push(new Paragraph({
             spacing: { before: 60, after: 40 },
             children: [
@@ -603,12 +653,12 @@ async function compilePlanoDocx(plan) {
         });
         docElements.push(tblAlunoTurma);
 
-        // Tabela Rubrica de Avaliação com Critérios (4 colunas)
+        // Tabela Rubrica de Avaliação com Critérios (4 colunas oficiais)
         const criterios = Array.isArray(sa.criterios) ? sa.criterios : [];
         const critRows = [
             new TableRow({
                 children: [
-                    createCell(createParagraph("Capacidades técnicas e socioemocionais", { bold: true, size: 18 }), { width: 30, fill: "F3F4F6" }),
+                    createCell(createParagraph("Capacidades básicas ou técnicas e socioemocionais", { bold: true, size: 18 }), { width: 30, fill: "F3F4F6" }),
                     createCell(createParagraph("Critérios de Avaliação", { bold: true, size: 18 }), { width: 50, fill: "F3F4F6" }),
                     createCell(createParagraph("Aluno", { bold: true, size: 18, alignment: AlignmentType.CENTER }), { width: 10, fill: "F3F4F6" }),
                     createCell(createParagraph("Professor", { bold: true, size: 18, alignment: AlignmentType.CENTER }), { width: 10, fill: "F3F4F6" })
@@ -635,7 +685,7 @@ async function compilePlanoDocx(plan) {
         });
         docElements.push(tblRubrica);
 
-        // Legenda
+        // Legenda oficial
         docElements.push(new Paragraph({
             spacing: { before: 20, after: 40 },
             children: [
@@ -647,7 +697,7 @@ async function compilePlanoDocx(plan) {
         }));
     });
 
-    // --- TABELA DE NÍVEIS DE DESEMPENHO (10 A 1) ---
+    // --- 4. TABELA OFICIAL DE NÍVEIS DE DESEMPENHO (10 A 1) ---
     let totalCrit = 0;
     let totalDesej = 0;
     situacoes.forEach(sa => {
@@ -707,7 +757,7 @@ async function compilePlanoDocx(plan) {
     });
     docElements.push(tblNiveis);
 
-    // Constrói o Documento DOCX Oficial
+    // --- 5. MONTAGEM FINAL DO DOCUMENTO COM PADRÕES INSTITUCIONAIS ---
     const doc = new Document({
         styles: {
             default: {
