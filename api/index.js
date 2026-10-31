@@ -1642,7 +1642,7 @@ module.exports = async (req, res) => {
         try {
             const body = await readRequestBody(req);
             const planData = JSON.parse(body);
-            const docxBuffer = compilePlanoDocx(planData);
+            const docxBuffer = await compilePlanoDocx(planData);
             const safeName = (planData.unidade || planData.sigla || planData.curso || 'Plano_de_Ensino').replace(/[^a-zA-Z0-9-_]/g, '_');
             res.writeHead(200, {
                 'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

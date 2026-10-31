@@ -17,6 +17,7 @@
   "author": "Docente SENAI",
   "license": "ISC",
   "dependencies": {
-    "adm-zip": "^0.6.0"
+    "adm-zip": "^0.6.0",
+    "docx": "^9.15.1"
   }
 }
