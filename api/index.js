@@ -671,6 +671,11 @@ Retorne APENAS um JSON no seguinte formato:
         if (plan) {
             plan.curso = courseName;
             plan.unidade = courseUnit;
+            plan.sigla = sigla;
+            plan.docente = courseInfo.docente || "Docente SENAI";
+            plan.turma = courseInfo.turma || "TURMA 2026";
+            plan.semAno = courseInfo.semAno || "2º Sem/2026";
+            plan.escola = courseInfo.escola || "Escola SENAI \"Mariano Ferraz\"";
             if (courseInfo.objetivoUC && courseInfo.objetivoUC.trim()) {
                 plan.objetivoUC = courseInfo.objetivoUC.trim();
             }

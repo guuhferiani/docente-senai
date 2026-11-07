@@ -1410,6 +1410,10 @@ async function handleGenerateMSEP() {
         if (response.ok) {
             const data = await response.json();
             currentMsepPlan = sanitizePlanObject(data.plan);
+            currentMsepPlan.docente = currentMsepPlan.docente || currentCourseData.docente || 'Docente Responsável';
+            currentMsepPlan.turma = currentMsepPlan.turma || currentCourseData.turma || `TURMA ${new Date().getFullYear()}`;
+            currentMsepPlan.semAno = currentMsepPlan.semAno || currentCourseData.semAno || `2º Sem/${new Date().getFullYear()}`;
+            currentMsepPlan.escola = currentMsepPlan.escola || currentCourseData.escola || 'Escola SENAI "Mariano Ferraz"';
             saveToLocalStorage();
             renderMSEPViewer();
             goToStep(3);
@@ -1752,6 +1756,19 @@ function handleAddNewSA() {
 function syncMsepPlanFromUI() {
     if (!currentMsepPlan) return;
 
+    if (currentCourseData?.docente && (!currentMsepPlan.docente || currentMsepPlan.docente === 'Docente SENAI')) {
+        currentMsepPlan.docente = currentCourseData.docente;
+    }
+    if (currentCourseData?.turma && (!currentMsepPlan.turma || currentMsepPlan.turma === 'TURMA 2026')) {
+        currentMsepPlan.turma = currentCourseData.turma;
+    }
+    if (currentCourseData?.semAno && !currentMsepPlan.semAno) {
+        currentMsepPlan.semAno = currentCourseData.semAno;
+    }
+    if (currentCourseData?.escola && !currentMsepPlan.escola) {
+        currentMsepPlan.escola = currentCourseData.escola;
+    }
+
     let globalRowCounter = 15;
 
     currentMsepPlan.situacoes.forEach((sa, saIdx) => {
@@ -1828,6 +1845,10 @@ function renderExportAndDocView() {
         ? 'Semipresencial (com EaD)'
         : '100% Presencial';
 
+    const docenteName = currentMsepPlan.docente || currentCourseData.docente || 'Docente Responsável';
+    const turmaName = currentMsepPlan.turma || currentCourseData.turma || '___________________';
+    const semAnoText = (currentMsepPlan.semAno || currentCourseData.semAno) ? ` (${currentMsepPlan.semAno || currentCourseData.semAno})` : '';
+
     let docHTML = `
         <div class="senai-doc-header">
             <div class="senai-doc-logo-container">
@@ -1846,6 +1867,10 @@ function renderExportAndDocView() {
             <tr>
                 <td style="width: 65%;"><strong>Unidade Curricular (UC):</strong> ${currentMsepPlan.unidade || currentMsepPlan.curso}</td>
                 <td style="width: 35%;"><strong>Modalidade:</strong> ${modalidadeLabel}</td>
+            </tr>
+            <tr>
+                <td style="width: 65%;"><strong>Docente Principal:</strong> ${docenteName}</td>
+                <td style="width: 35%;"><strong>Turma / Semestre:</strong> ${turmaName}${semAnoText}</td>
             </tr>
             <tr>
                 <td style="width: 50%;"><strong>Carga horária da UC:</strong> ${currentMsepPlan.cargaHoraria} horas</td>
@@ -1951,8 +1976,9 @@ function renderExportAndDocView() {
                 <div class="doc-sa-title">INSTRUMENTO DE REGISTRO</div>
                 <table class="senai-table-doc" style="margin-bottom: 0.25rem;">
                     <tr>
-                        <td style="width: 70%;"><strong>Nome do aluno:</strong> __________________________________________________</td>
-                        <td style="width: 30%;"><strong>Turma:</strong> ${currentMsepPlan.turma || '___________________'}</td>
+                        <td style="width: 50%;"><strong>Nome do aluno:</strong> __________________________________________________</td>
+                        <td style="width: 25%;"><strong>Turma:</strong> ${turmaName}</td>
+                        <td style="width: 25%;"><strong>Docente:</strong> ${docenteName}</td>
                     </tr>
                 </table>
                 <table class="senai-table-doc">
@@ -2012,6 +2038,12 @@ function renderExportAndDocView() {
                     `).join('')}
                 </tbody>
             </table>
+
+            <div class="senai-doc-signature">
+                <div class="senai-doc-signature-line">________________________________________________________</div>
+                <div class="senai-doc-signature-name"><strong>Docente Responsável:</strong> ${docenteName}</div>
+                <div class="senai-doc-signature-school">${currentMsepPlan.escola || currentCourseData.escola || 'Escola SENAI'} — SENAI-SP</div>
+            </div>
         </div>
     `;
 

@@ -182,6 +182,8 @@ async function compilePlanoDocx(plan) {
     const numAulas = sanitize(plan.numAulas) || `${cargaHoraria} aulas`;
     const objetivoUC = sanitize(plan.objetivoUC) || 'Desenvolver capacidades técnicas e socioemocionais relativas à área de atuação.';
     const turma = sanitize(plan.turma) || '___________________';
+    const docente = sanitize(plan.docente || plan.professor) || 'Docente Responsável';
+    const semAno = sanitize(plan.semAno) || '';
 
     const tipoLabels = {
         tecnico: 'Curso Técnico de Nível Médio',
@@ -325,6 +327,28 @@ async function compilePlanoDocx(plan) {
                             children: [
                                 new TextRun({ text: "Modalidade: ", bold: true, size: 19 }),
                                 new TextRun({ text: modalidadeLabel, size: 19 })
+                            ]
+                        })
+                    ], { width: 35 })
+                ]
+            }),
+            new TableRow({
+                children: [
+                    createCell([
+                        new Paragraph({
+                            spacing: { before: 20, after: 20 },
+                            children: [
+                                new TextRun({ text: "Docente Principal: ", bold: true, size: 19 }),
+                                new TextRun({ text: docente, size: 19 })
+                            ]
+                        })
+                    ], { width: 65 }),
+                    createCell([
+                        new Paragraph({
+                            spacing: { before: 20, after: 20 },
+                            children: [
+                                new TextRun({ text: "Turma / Semestre: ", bold: true, size: 19 }),
+                                new TextRun({ text: `${turma}${semAno ? ` (${semAno})` : ''}`, size: 19 })
                             ]
                         })
                     ], { width: 35 })
@@ -622,7 +646,7 @@ async function compilePlanoDocx(plan) {
             ]
         }));
 
-        // Linha Nome do Aluno e Turma
+        // Linha Nome do Aluno, Turma e Docente
         const tblAlunoTurma = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             borders: TABLE_BORDERS,
@@ -634,10 +658,10 @@ async function compilePlanoDocx(plan) {
                                 spacing: { before: 20, after: 20 },
                                 children: [
                                     new TextRun({ text: "Nome do aluno: ", bold: true, size: 19 }),
-                                    new TextRun({ text: "__________________________________________________", size: 19 })
+                                    new TextRun({ text: "____________________________________", size: 19 })
                                 ]
                             })
-                        ], { width: 70 }),
+                        ], { width: 50 }),
                         createCell([
                             new Paragraph({
                                 spacing: { before: 20, after: 20 },
@@ -646,7 +670,16 @@ async function compilePlanoDocx(plan) {
                                     new TextRun({ text: turma, size: 19 })
                                 ]
                             })
-                        ], { width: 30 })
+                        ], { width: 25 }),
+                        createCell([
+                            new Paragraph({
+                                spacing: { before: 20, after: 20 },
+                                children: [
+                                    new TextRun({ text: "Docente: ", bold: true, size: 19 }),
+                                    new TextRun({ text: docente, size: 19 })
+                                ]
+                            })
+                        ], { width: 25 })
                     ]
                 })
             ]
@@ -756,6 +789,30 @@ async function compilePlanoDocx(plan) {
         rows: niveisRows
     });
     docElements.push(tblNiveis);
+
+    // Bloco de Assinatura e Encerramento Institucional do Docente
+    docElements.push(new Paragraph({ spacing: { before: 140, after: 30 } }));
+    docElements.push(new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 20, after: 10 },
+        children: [
+            new TextRun({ text: "________________________________________________________", size: 19, color: "555555" })
+        ]
+    }));
+    docElements.push(new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 0, after: 10 },
+        children: [
+            new TextRun({ text: `Docente Responsável: ${docente}`, bold: true, size: 20 })
+        ]
+    }));
+    docElements.push(new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 0, after: 40 },
+        children: [
+            new TextRun({ text: `${escola} — SENAI-SP`, size: 18, color: "555555" })
+        ]
+    }));
 
     // --- 5. MONTAGEM FINAL DO DOCUMENTO COM PADRÕES INSTITUCIONAIS ---
     const doc = new Document({
