@@ -1,5 +1,6 @@
 const zlib = require('zlib');
 const https = require('https');
+const pdfParse = require('pdf-parse');
 
 /**
  * Pure Node.js in-memory PDF text extractor
@@ -34,11 +35,11 @@ function parseCMapStream(streamStr) {
 }
 
 /**
- * Pure Node.js in-memory robust PDF text extractor
+ * Pure Node.js in-memory legacy PDF text extractor (fallback)
  * Parses per-font Adobe Identity / ToUnicode CMaps, tracks text baseline coordinates
  * to properly format lines, and avoids character-level space splitting.
  */
-function extractPdfText(buffer) {
+function extractPdfTextLegacy(buffer) {
     if (!buffer || !Buffer.isBuffer(buffer)) return '';
     const str = buffer.toString('latin1');
     let cursor = 0;
@@ -181,6 +182,25 @@ function extractPdfText(buffer) {
 }
 
 /**
+ * Extracts text from a PDF Buffer using pdf-parse (PDF.js), with legacy fallback.
+ */
+async function extractPdfText(buffer) {
+    if (!buffer || !Buffer.isBuffer(buffer)) return '';
+    try {
+        const data = await pdfParse(buffer);
+        if (data && data.text && data.text.trim().length > 0) {
+            return data.text
+                .replace(/[ \t]+/g, ' ')
+                .replace(/\n\s*\n/g, '\n')
+                .trim();
+        }
+    } catch (err) {
+        console.warn('pdf-parse failed, falling back to legacy extractor:', err.message);
+    }
+    return extractPdfTextLegacy(buffer);
+}
+
+/**
  * Heuristically parses SENAI Course Plan text to detect Level, Structure, and UCs
  */
 function parseCoursePlanHeuristic(text, fileName = '') {
@@ -201,11 +221,11 @@ function parseCoursePlanHeuristic(text, fileName = '') {
 
     // 2. Extract Course Name
     let cursoNome = '';
-    const mTec = preface.match(/Habilita..o\s+(?:Profissional\s+)?(?:de\s+)?T.cnico\s+em\s+([0-9A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ\s]{4,60})/i)
-        || preface.match(/T[EÉ]CNICO\s+EM\s+([0-9A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ\s]{4,60})/i);
-    const mCai = preface.match(/Aprendizagem\s+Industrial\s*(?::\s*|\s+)([0-9A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ\s]{4,60})/i);
+    const mTec = preface.match(/Habilita..o\s+(?:Profissional\s+)?(?:de\s+)?T.cnico\s+em\s+([0-9A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ \t]{4,60})/i)
+        || preface.match(/T[EÉ]CNICO\s+EM[ \t\r\n]+([0-9A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ \t]{4,60})/i);
+    const mCai = preface.match(/Aprendizagem\s+Industrial\s*(?::[ \t]*|[ \t]+)([0-9A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ \t]{4,60})/i);
     const mFicDash = preface.match(/(?:Aperfeiçoamento|Qualificação|Iniciação)\s+Profissional\s*[—–-]\s*([^\n\r]{4,120})/i);
-    const mFic = mFicDash || preface.match(/(?:Aperfeiçoamento|Qualificação|Iniciação)\s+Profissional\s*(?::\s*|\s+)([0-9A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇa-záéíóúâêîôûãõç\s\-_/]{4,80})/i);
+    const mFic = mFicDash || preface.match(/(?:Aperfeiçoamento|Qualificação|Iniciação)\s+Profissional\s*(?::[ \t]*|[ \t]+)([0-9A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇa-záéíóúâêîôûãõç \t\-_/]{4,80})/i);
 
     if (cursoTipo === 'tecnico' && mTec) {
         cursoNome = "Técnico em " + mTec[1].trim();
@@ -243,13 +263,16 @@ function parseCoursePlanHeuristic(text, fileName = '') {
     // Focus search on Quadro de Organização Curricular (filtering out Table of Contents)
     let searchScope = text;
     const quadroMatches = [...text.matchAll(/Quadro[s]?\s+de\s+Organização\s+Curricular/gi)]
-        .filter(m => !/\s+\d{1,3}\s*\r?\n\s*[a-z]\)/i.test(text.slice(m.index, m.index + 80)));
+        .filter(m => {
+            const after = text.slice(m.index, m.index + 120);
+            return !/\.{3,}\s*\d+/.test(after) && !/\s+\d{1,3}\s*\r?\n\s*[a-z]\)/i.test(after);
+        });
     
     if (quadroMatches.length > 0) {
         // Pick the match that is past preface (or last one)
         const qMatch = quadroMatches.find(m => m.index > 1500) || quadroMatches[0];
         const startIdx = qMatch.index;
-        const nextSectionMatch = text.slice(startIdx).match(/\b(?:b\)\s+Desenvolvimento\s+Metodológico|c\)\s+Ementa|V\.\s+CRITÉRIOS)\b/i);
+        const nextSectionMatch = text.slice(startIdx).match(/\b(?:[a-z]\)\s+Desenvolvimento\s+Metodol[oó]gico|[a-z]\)\s+Ementa|V\.\s+CRITÉRIOS)\b/i);
         const endIdx = nextSectionMatch ? (startIdx + nextSectionMatch.index) : Math.min(startIdx + 6000, text.length);
         searchScope = text.slice(startIdx, endIdx);
     }
@@ -262,13 +285,15 @@ function parseCoursePlanHeuristic(text, fileName = '') {
     searchScope = searchScope.replace(/\bpresencial\b/gi, ' ');
     searchScope = searchScope.replace(/\bAtividade[s]?\b/gi, ' ');
 
-    const tablePattern = /([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõçA-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ\s\-_/]{4,70})\s+(\d{2,3})\s*(?:h|horas|\b)/g;
+    const tablePattern = /([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõçA-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ\s\-_/]{4,70})((?:\s+\d{2,3})+)\s*(?:h|horas|\b)/g;
     let m;
     while ((m = tablePattern.exec(searchScope)) !== null) {
         let rawName = m[1].replace(/\s+/g, ' ').trim();
         rawName = rawName.replace(/^(?:Módulo|Etapa|Semestre|Nível|Legislação|Quadro|Operacionalização|Horas|Atividade)[^\w]*[A-Za-z0-9]*\s*/i, '').trim();
-        const ch = parseInt(m[2]);
-        const isBlacklisted = /\b(?:página|departamento|conselho|resolução|artigo|título|carga\s+hor[aá]ria|total|itiner[aá]rio|sum[aá]rio|anexo|etapa|nível\s+de\s+ensino|legisla[çc][aã]o|unidade\s+curricular|turmas?|máximo|mínimo|frequência|avaliação|aproveitamento|estágio|número)\b/i.test(rawName)
+        const nums = m[2].trim().split(/\s+/).map(n => parseInt(n, 10));
+        const ch = nums[nums.length - 1];
+        const exactRemoto = (nums.length >= 3 && nums[0] + nums[1] === ch) ? nums[1] : null;
+        const isBlacklisted = /\b(?:página|departamento|conselho|resolução|artigo|título|carga\s+hor[aá]ria|total|itiner[aá]rio|sum[aá]rio|anexo|etapa|nível\s+de\s+ensino|legisla[çc][aã]o|unidade\s+curricular|turmas?|máximo|mínimo|frequência|avaliação|aproveitamento|estágio|número|microsoft|windows)\b/i.test(rawName)
             || /^(?:entre|acima|como|pelo|pela|conforme|segundo|de\s+acordo|a\s+partir|as|os|um|uma)\b/i.test(rawName);
 
         if (!isBlacklisted && ch >= 20 && ch <= 400 && rawName.length >= 6 && rawName.length <= 65) {
@@ -279,7 +304,7 @@ function parseCoursePlanHeuristic(text, fileName = '') {
                     nome: rawName,
                     cargaHoraria: ch,
                     semestre: null,
-                    remotoHoras: (hasRemoto && ch >= 60) ? Math.round(ch * 0.2) : 0
+                    remotoHoras: exactRemoto !== null ? exactRemoto : ((hasRemoto && ch >= 60) ? Math.round(ch * 0.2) : 0)
                 });
             }
         }
@@ -291,8 +316,10 @@ function parseCoursePlanHeuristic(text, fileName = '') {
         while ((mFallback = tablePattern.exec(text)) !== null) {
             let rawName = mFallback[1].replace(/\s+/g, ' ').trim();
             rawName = rawName.replace(/^(?:Módulo|Etapa|Semestre|Nível|Legislação|Quadro|Operacionalização|Horas|Atividade)[^\w]*[A-Za-z0-9]*\s*/i, '').trim();
-            const ch = parseInt(mFallback[2]);
-            const isBlacklisted = /\b(?:página|departamento|conselho|resolução|artigo|título|carga\s+hor[aá]ria|total|itiner[aá]rio|sum[aá]rio|anexo|etapa|nível\s+de\s+ensino|legisla[çc][aã]o|unidade\s+curricular|turmas?|máximo|mínimo|frequência|avaliação|aproveitamento|estágio|número)\b/i.test(rawName)
+            const nums = mFallback[2].trim().split(/\s+/).map(n => parseInt(n, 10));
+            const ch = nums[nums.length - 1];
+            const exactRemoto = (nums.length >= 3 && nums[0] + nums[1] === ch) ? nums[1] : null;
+            const isBlacklisted = /\b(?:página|departamento|conselho|resolução|artigo|título|carga\s+hor[aá]ria|total|itiner[aá]rio|sum[aá]rio|anexo|etapa|nível\s+de\s+ensino|legisla[çc][aã]o|unidade\s+curricular|turmas?|máximo|mínimo|frequência|avaliação|aproveitamento|estágio|número|microsoft|windows)\b/i.test(rawName)
                 || /^(?:entre|acima|como|pelo|pela|conforme|segundo|de\s+acordo|a\s+partir|as|os|um|uma)\b/i.test(rawName);
             if (!isBlacklisted && ch >= 20 && ch <= 400 && rawName.length >= 6 && rawName.length <= 65) {
                 const key = rawName.toUpperCase();
@@ -302,7 +329,7 @@ function parseCoursePlanHeuristic(text, fileName = '') {
                         nome: rawName,
                         cargaHoraria: ch,
                         semestre: null,
-                        remotoHoras: (hasRemoto && ch >= 60) ? Math.round(ch * 0.2) : 0
+                        remotoHoras: exactRemoto !== null ? exactRemoto : ((hasRemoto && ch >= 60) ? Math.round(ch * 0.2) : 0)
                     });
                 }
             }

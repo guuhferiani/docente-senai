@@ -1673,7 +1673,7 @@ module.exports = async (req, res) => {
             let text = '';
             if (data.fileData) {
                 const buf = Buffer.from(data.fileData, 'base64');
-                text = extractPdfText(buf);
+                text = await extractPdfText(buf);
             } else if (data.text) {
                 text = data.text;
             }
